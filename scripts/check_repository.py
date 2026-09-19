@@ -117,6 +117,15 @@ try:
     api = read('contracts/openapi.json')
     require(api['openapi'] == '3.0.3', 'OpenAPI version')
     require(read('test-data/api/variants.json') == [summary], 'API fixture drift')
+    job_schema = api['components']['schemas']['Job']
+    for path in (ROOT / 'test-data/api').glob('job-*.json'):
+        job = json.loads(path.read_text(encoding='utf-8'))
+        require(all(field in job for field in job_schema['required']), f'Missing Job field: {path.name}')
+        for field in ('status', 'stage', 'mode'):
+            require(job[field] in job_schema['properties'][field]['enum'], f'Invalid Job {field}: {path.name}')
+        require(isinstance(job['jobId'], str) and isinstance(job['diagnostics'], list), f'Invalid Job types: {path.name}')
+        for error in job['diagnostics']:
+            require(isinstance(error.get('code'), str) and isinstance(error.get('message'), str), f'Invalid Job error: {path.name}')
     def check_refs(obj):
         if isinstance(obj, dict):
             if '$ref' in obj:

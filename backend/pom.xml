@@ -49,6 +49,10 @@
     <build>
         <testResources>
             <testResource>
+                <directory>${project.basedir}/../contracts</directory>
+                <targetPath>contracts</targetPath>
+            </testResource>
+            <testResource>
                 <directory>${project.basedir}/../test-data</directory>
                 <targetPath>fixtures</targetPath>
             </testResource>

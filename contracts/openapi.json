@@ -3,7 +3,7 @@
   "info": {
     "title": "Heat Network Routing team API",
     "version": "1.0.0",
-    "description": "Version 1 integration contract. Only /api/health is implemented; other operations are planned."
+    "description": "Version 1 integration contract. Health, upload and job status are implemented. Routing/calculation/export are not connected: valid inputs currently end in FAILED with PROCESSING_UNAVAILABLE. Variants, result download and map remain planned."
   },
   "paths": {
     "/api/health": {
@@ -42,7 +42,7 @@
     "/api/jobs": {
       "post": {
         "operationId": "createJob",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "requestBody": {
           "required": true,
           "content": {
@@ -76,53 +76,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "jobId",
-                    "status",
-                    "stage",
-                    "mode",
-                    "diagnostics"
-                  ],
-                  "properties": {
-                    "jobId": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "QUEUED",
-                        "RUNNING",
-                        "SUCCEEDED",
-                        "FAILED"
-                      ]
-                    },
-                    "stage": {
-                      "type": "string",
-                      "enum": [
-                        "QUEUED",
-                        "VALIDATING",
-                        "ROUTING",
-                        "CALCULATING",
-                        "EXPORTING",
-                        "DONE",
-                        "FAILED"
-                      ]
-                    },
-                    "mode": {
-                      "type": "string",
-                      "enum": [
-                        "2d",
-                        "depth"
-                      ]
-                    },
-                    "diagnostics": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Error"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Relative URL of this job status",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -138,7 +100,7 @@
             }
           },
           "413": {
-            "description": "File exceeds configured 3 GiB limit",
+            "description": "File or entire multipart request exceeds the configured byte limit",
             "content": {
               "application/json": {
                 "schema": {
@@ -165,9 +127,38 @@
                   "$ref": "#/components/schemas/Error"
                 }
               }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Suggested delay in seconds before retrying",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server storage or processing error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request must use multipart/form-data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
             }
           }
-        }
+        },
+        "description": "Exactly one nonempty multipart file named file. mode defaults to 2d when omitted. An empty/unknown/duplicate mode is invalid; depth is currently unsupported. The original filename is ignored. Default file limit: 3 GiB; request limit: file limit + 1 MiB. Limits may be lowered by server configuration."
       }
     },
     "/api/jobs/{jobId}": {
@@ -183,66 +174,38 @@
       ],
       "get": {
         "operationId": "getJob",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "responses": {
           "200": {
             "description": "Current task state.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "jobId",
-                    "status",
-                    "stage",
-                    "mode",
-                    "diagnostics"
-                  ],
-                  "properties": {
-                    "jobId": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "QUEUED",
-                        "RUNNING",
-                        "SUCCEEDED",
-                        "FAILED"
-                      ]
-                    },
-                    "stage": {
-                      "type": "string",
-                      "enum": [
-                        "QUEUED",
-                        "VALIDATING",
-                        "ROUTING",
-                        "CALCULATING",
-                        "EXPORTING",
-                        "DONE",
-                        "FAILED"
-                      ]
-                    },
-                    "mode": {
-                      "type": "string",
-                      "enum": [
-                        "2d",
-                        "depth"
-                      ]
-                    },
-                    "diagnostics": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Error"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store: poll for fresh status",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
           },
           "404": {
             "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server storage or processing error",
             "content": {
               "application/json": {
                 "schema": {
@@ -472,7 +435,8 @@
         ],
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, PROCESSING_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. This is an extensible string, not a closed enum."
           },
           "message": {
             "type": "string"
@@ -481,7 +445,8 @@
             "type": "array",
             "items": {
               "type": "object"
-            }
+            },
+            "description": "Optional diagnostic references. inputObjectId preserves the original JSON number/string type; candidateId and segmentId refer to internal candidate/segment IDs. No filesystem paths or stack traces are returned."
           }
         }
       },
@@ -829,6 +794,56 @@
             "additionalProperties": true
           }
         }
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "status",
+          "stage",
+          "mode",
+          "diagnostics"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "SUCCEEDED",
+              "FAILED"
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "VALIDATING",
+              "ROUTING",
+              "CALCULATING",
+              "EXPORTING",
+              "DONE",
+              "FAILED"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "2d",
+              "depth"
+            ]
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        },
+        "description": "QUEUED is returned after the upload is stored. VALIDATING parses the input asynchronously. SUCCEEDED/DONE is reserved for finished calculation and export; validation alone cannot succeed a job. Terminal states are retained for 24 hours by default; expired or unknown jobs return 404."
       }
     }
   }

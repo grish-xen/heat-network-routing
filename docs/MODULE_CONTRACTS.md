@@ -39,7 +39,9 @@ VariantCalculator считает расход, выбирает ДУ с учёт
 
 ## HTTP-контракт
 
-Полный документ: `contracts/openapi.json`. Все пути, кроме `/api/health`, помечены planned и ещё не реализованы. Публичный Swagger запущенного приложения сейчас документирует только реализованный health.
+Полный документ: `contracts/openapi.json`. Реализованы `/api/health`, POST `/api/jobs` и GET `/api/jobs/{jobId}`. Публичный Swagger документирует эти операции. Карта и операции результатов пока planned. Поведение, очередь, хранение и подключение координатора описаны в [JOB_API.md](JOB_API.md).
+
+Сейчас фоновая обработка ограничена настоящей валидацией: после неё корректный файл заканчивается `FAILED / PROCESSING_UNAVAILABLE`, ошибочный — диагностикой InputParser. SUCCEEDED/DONE зарезервированы для полной цепочки. Ошибки перезапуска: SERVER_RESTARTED и JOB_INTERRUPTED; HTTP-коды ошибок приёма приведены в OpenAPI. Структуры Job/Error не изменены; уточнены Location, Cache-Control, Retry-After и ответы 415/500.
 
 POST `/api/jobs` сохраняет multipart-файл и отвечает 202; валидация и расчёт продолжаются асинхронно. GET `/api/jobs/{jobId}` отдаёт статус. GET `/api/jobs/{jobId}/variants` отдаёт сводки с официальными snake_case полями. GET `/api/jobs/{jobId}/result` скачивает GeoJSON потоком. GET `/api/jobs/{jobId}/map` возвращает страницу пространственных объектов по bbox, слою и варианту; frontend не загружает весь файл до 3 ГБ в память браузера.
 
