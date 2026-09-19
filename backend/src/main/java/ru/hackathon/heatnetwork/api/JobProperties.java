@@ -1,0 +1,30 @@
+package ru.hackathon.heatnetwork.api;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import javax.validation.constraints.Max;
+import javax.validation.constraints.Min;
+import javax.validation.constraints.NotNull;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
+
+@Validated
+@ConfigurationProperties("heat-network.jobs")
+public class JobProperties {
+    @NotNull private Path storageDirectory = Path.of(System.getProperty("java.io.tmpdir"), "heat-network-routing", "jobs");
+    @Min(1) @Max(50) private int workers = 2;
+    @Min(0) @Max(1000) private int queueCapacity = 48;
+    @Min(1) @Max(3221225472L) private long maxFileBytes = 3L * 1024 * 1024 * 1024;
+    @NotNull private Duration retention = Duration.ofHours(24);
+
+    public Path getStorageDirectory() { return storageDirectory; }
+    public void setStorageDirectory(Path value) { storageDirectory = value; }
+    public int getWorkers() { return workers; }
+    public void setWorkers(int value) { workers = value; }
+    public int getQueueCapacity() { return queueCapacity; }
+    public void setQueueCapacity(int value) { queueCapacity = value; }
+    public long getMaxFileBytes() { return maxFileBytes; }
+    public void setMaxFileBytes(long value) { maxFileBytes = value; }
+    public Duration getRetention() { return retention; }
+    public void setRetention(Duration value) { retention = value; }
+}

@@ -8,7 +8,8 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.ResponseEntity;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "heat-network.jobs.storage-directory=${java.io.tmpdir}/heat-smoke-${random.uuid}")
 class ApplicationSmokeTest {
     @Autowired private TestRestTemplate http;
 

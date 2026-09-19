@@ -3,6 +3,7 @@ WORKDIR /build
 COPY backend/pom.xml backend/pom.xml
 COPY backend/src backend/src
 COPY test-data test-data
+COPY contracts contracts
 RUN mvn --batch-mode --no-transfer-progress -f backend/pom.xml verify
 
 FROM eclipse-temurin:11-jre-jammy

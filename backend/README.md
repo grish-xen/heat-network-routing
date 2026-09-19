@@ -9,7 +9,7 @@ mvn -f backend/pom.xml verify
 mvn -f backend/pom.xml spring-boot:run
 ```
 
-Доступны `/api/health`, `/v3/api-docs`, `/swagger-ui.html`. Сервер прямо сообщает `implementation: skeleton`. Продуктовые операции из `contracts/openapi.json` ещё предстоит реализовать; их отсутствие не скрыто заглушками, возвращающими вымышленные расчёты.
+Доступны `/api/health`, `/v3/api-docs`, `/swagger-ui.html`, `POST /api/jobs` и `GET /api/jobs/{jobId}`. Сервер пока сообщает `implementation: skeleton`: расчётные модули ещё не подключены. [Загрузка и очередь](../docs/JOB_API.md) вызывают настоящий InputParser; корректный файл заканчивается `FAILED / PROCESSING_UNAVAILABLE`, ошибочный — диагностикой содержимого. Swagger показывает реализованные операции, `contracts/openapi.json` также содержит planned-операции карты и результатов.
 
 JTS 1.19.0 задаёт единую модель геометрии для модулей. Каталог правил читается из classpath `/rules/catalog-v1.json`. [Модуль input](../docs/INPUT_MODULE.md) реализует чтение, валидацию и проекцию Proj4J 1.4.1 с временным дисковым хранилищем. Пространственный индекс для ускорения выборок, расчёт и экспорт — следующие задачи команды.
 

@@ -1,0 +1,17 @@
+{
+  "jobId": "00000000-0000-4000-8000-000000000001",
+  "status": "FAILED",
+  "stage": "FAILED",
+  "mode": "2d",
+  "diagnostics": [
+    {
+      "code": "INVALID_GEOMETRY",
+      "message": "features[1]: Некорректная геометрия",
+      "details": [
+        {
+          "inputObjectId": "2"
+        }
+      ]
+    }
+  ]
+}
