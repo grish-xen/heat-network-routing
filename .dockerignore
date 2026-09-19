@@ -1,0 +1,10 @@
+.git
+.build-tools
+backend/target
+frontend/node_modules
+frontend/dist
+uploads
+results
+tmp
+.env
+*.log
