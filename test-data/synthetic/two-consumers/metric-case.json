@@ -1,0 +1,109 @@
+{
+  "contractVersion": "1.0",
+  "srid": 32637,
+  "candidateId": "two-consumers",
+  "nodes": [
+    {
+      "id": "root",
+      "kind": "EXISTING_CHAMBER",
+      "inputObjectId": "existing-chamber",
+      "xy": [
+        400000,
+        6170000
+      ]
+    },
+    {
+      "id": "branch",
+      "kind": "NEW_CHAMBER",
+      "inputObjectId": null,
+      "xy": [
+        400100,
+        6170000
+      ]
+    },
+    {
+      "id": "a",
+      "kind": "CONNECTION_POINT",
+      "inputObjectId": 1,
+      "xy": [
+        400100,
+        6170050
+      ]
+    },
+    {
+      "id": "b",
+      "kind": "CONNECTION_POINT",
+      "inputObjectId": "2",
+      "xy": [
+        400100,
+        6169950
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "trunk",
+      "fromNodeId": "root",
+      "toNodeId": "branch",
+      "xy": [
+        [
+          400000,
+          6170000
+        ],
+        [
+          400100,
+          6170000
+        ]
+      ],
+      "flowTph": 25,
+      "diameterMm": 125,
+      "lengthM": 100,
+      "costRub": 9727500
+    },
+    {
+      "id": "to-a",
+      "fromNodeId": "branch",
+      "toNodeId": "a",
+      "xy": [
+        [
+          400100,
+          6170000
+        ],
+        [
+          400100,
+          6170050
+        ]
+      ],
+      "flowTph": 10,
+      "diameterMm": 80,
+      "lengthM": 50,
+      "costRub": 4176500
+    },
+    {
+      "id": "to-b",
+      "fromNodeId": "branch",
+      "toNodeId": "b",
+      "xy": [
+        [
+          400100,
+          6170000
+        ],
+        [
+          400100,
+          6169950
+        ]
+      ],
+      "flowTph": 15,
+      "diameterMm": 100,
+      "lengthM": 50,
+      "costRub": 4487400
+    }
+  ],
+  "attachments": [
+    {
+      "rootNodeId": "root",
+      "existingObjectId": "existing-chamber"
+    }
+  ],
+  "unconnectedPointIds": []
+}

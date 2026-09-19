@@ -1,0 +1,7 @@
+{
+  "jobId": "example-job",
+  "status": "SUCCEEDED",
+  "stage": "DONE",
+  "mode": "2d",
+  "diagnostics": []
+}

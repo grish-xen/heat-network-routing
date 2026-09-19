@@ -1,0 +1,835 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Heat Network Routing team API",
+    "version": "1.0.0",
+    "description": "Version 1 integration contract. Only /api/health is implemented; other operations are planned."
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Process is running; does not imply solver readiness.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "contractVersion",
+                    "implementation"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "contractVersion": {
+                      "type": "string"
+                    },
+                    "implementation": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs": {
+      "post": {
+        "operationId": "createJob",
+        "x-implementation": "planned",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "2d",
+                      "depth"
+                    ],
+                    "default": "2d"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Upload stored; asynchronous processing queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "jobId",
+                    "status",
+                    "stage",
+                    "mode",
+                    "diagnostics"
+                  ],
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "QUEUED",
+                        "RUNNING",
+                        "SUCCEEDED",
+                        "FAILED"
+                      ]
+                    },
+                    "stage": {
+                      "type": "string",
+                      "enum": [
+                        "QUEUED",
+                        "VALIDATING",
+                        "ROUTING",
+                        "CALCULATING",
+                        "EXPORTING",
+                        "DONE",
+                        "FAILED"
+                      ]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "2d",
+                        "depth"
+                      ]
+                    },
+                    "diagnostics": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Error"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File exceeds configured 3 GiB limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Mode unsupported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Queue capacity reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jobId}": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getJob",
+        "x-implementation": "planned",
+        "responses": {
+          "200": {
+            "description": "Current task state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "jobId",
+                    "status",
+                    "stage",
+                    "mode",
+                    "diagnostics"
+                  ],
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "QUEUED",
+                        "RUNNING",
+                        "SUCCEEDED",
+                        "FAILED"
+                      ]
+                    },
+                    "stage": {
+                      "type": "string",
+                      "enum": [
+                        "QUEUED",
+                        "VALIDATING",
+                        "ROUTING",
+                        "CALCULATING",
+                        "EXPORTING",
+                        "DONE",
+                        "FAILED"
+                      ]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "2d",
+                        "depth"
+                      ]
+                    },
+                    "diagnostics": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Error"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jobId}/variants": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "listVariants",
+        "x-implementation": "planned",
+        "responses": {
+          "200": {
+            "description": "Ranked summaries using official snake_case fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "maxItems": 3,
+                  "items": {
+                    "$ref": "#/components/schemas/VariantSummary"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Result not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jobId}/result": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "downloadResult",
+        "x-implementation": "planned",
+        "responses": {
+          "200": {
+            "description": "Streamed GeoJSON attachment, up to 500 MiB.",
+            "content": {
+              "application/geo+json": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Result not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{jobId}/map": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getMapPage",
+        "x-implementation": "planned",
+        "parameters": [
+          {
+            "name": "layer",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "input",
+                "result"
+              ]
+            }
+          },
+          {
+            "name": "variantId",
+            "in": "query",
+            "description": "Required for result layer; server-issued variant IDs are strings.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bbox",
+            "in": "query",
+            "required": true,
+            "description": "minLon,minLat,maxLon,maxLat in EPSG:4326",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "default": 1000
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded page; follow nextCursor with identical query until null.",
+            "content": {
+              "application/geo+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid map query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job or variant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Data not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "MapPage": {
+        "type": "object",
+        "required": [
+          "type",
+          "features",
+          "nextCursor"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "FeatureCollection"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MapFeature"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "VariantSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "object_type",
+          "variant_id",
+          "rank",
+          "construction_cost",
+          "chamber_construction_cost",
+          "existing_chamber_tie_in_count",
+          "existing_chamber_tie_in_cost",
+          "unconnected_penalty",
+          "calculated_cost",
+          "new_network_length",
+          "score",
+          "unconnected_oks_ids"
+        ],
+        "properties": {
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "object_type": {
+            "type": "string",
+            "enum": [
+              "variant_summary"
+            ]
+          },
+          "variant_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "rank": {
+            "type": "integer"
+          },
+          "construction_cost": {
+            "type": "number"
+          },
+          "chamber_construction_cost": {
+            "type": "number"
+          },
+          "existing_chamber_tie_in_count": {
+            "type": "integer"
+          },
+          "existing_chamber_tie_in_cost": {
+            "type": "number"
+          },
+          "unconnected_penalty": {
+            "type": "number"
+          },
+          "calculated_cost": {
+            "type": "number"
+          },
+          "new_network_length": {
+            "type": "number"
+          },
+          "score": {
+            "type": "number"
+          },
+          "unconnected_oks_ids": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Geometry": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Point"
+                ]
+              },
+              "coordinates": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "LineString"
+                ]
+              },
+              "coordinates": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "minItems": 2
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "MultiLineString"
+                ]
+              },
+              "coordinates": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "minItems": 2
+                },
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Polygon"
+                ]
+              },
+              "coordinates": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "minItems": 4
+                },
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "MultiPolygon"
+                ]
+              },
+              "coordinates": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2
+                    },
+                    "minItems": 4
+                  },
+                  "minItems": 1
+                },
+                "minItems": 1
+              }
+            }
+          }
+        ]
+      },
+      "MapFeature": {
+        "type": "object",
+        "required": [
+          "type",
+          "geometry",
+          "properties"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "Feature"
+            ]
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/Geometry"
+          },
+          "properties": {
+            "type": "object",
+            "required": [
+              "id",
+              "object_type"
+            ],
+            "properties": {
+              "id": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "object_type": {
+                "type": "string",
+                "enum": [
+                  "source",
+                  "heat_network",
+                  "heat_chamber",
+                  "oks_connection_point",
+                  "restriction",
+                  "technical_node"
+                ]
+              },
+              "variant_id": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "diameter": {
+                "type": "integer"
+              },
+              "flow_tph": {
+                "type": "number"
+              },
+              "restriction_type": {
+                "type": "string"
+              },
+              "cost": {
+                "type": "number"
+              },
+              "length": {
+                "type": "number"
+              },
+              "laying_method": {
+                "type": "string",
+                "enum": [
+                  "base",
+                  "special"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,271 @@
+{
+  "version": "1.0",
+  "mode": "2d",
+  "sourceSha256": "c757f68dcf58f23abd18cb9217cd65107102bd53653a7485041d4363e54b71d6",
+  "diameters": [
+    {
+      "diameterMm": 50,
+      "capacityTph": 3.5,
+      "maxLengthM": 181,
+      "newCostRubPerM": 74023,
+      "widthM": 0.4,
+      "heightM": 0.125
+    },
+    {
+      "diameterMm": 65,
+      "capacityTph": 8.3,
+      "maxLengthM": 245,
+      "newCostRubPerM": 78631,
+      "widthM": 0.43,
+      "heightM": 0.14
+    },
+    {
+      "diameterMm": 80,
+      "capacityTph": 13.2,
+      "maxLengthM": 327,
+      "newCostRubPerM": 83530,
+      "widthM": 0.47,
+      "heightM": 0.16
+    },
+    {
+      "diameterMm": 100,
+      "capacityTph": 22.3,
+      "maxLengthM": 419,
+      "newCostRubPerM": 89748,
+      "widthM": 0.51,
+      "heightM": 0.18
+    },
+    {
+      "diameterMm": 125,
+      "capacityTph": 40.2,
+      "maxLengthM": 554,
+      "newCostRubPerM": 97275,
+      "widthM": 0.6,
+      "heightM": 0.225
+    },
+    {
+      "diameterMm": 150,
+      "capacityTph": 65.1,
+      "maxLengthM": 696,
+      "newCostRubPerM": 105507,
+      "widthM": 0.65,
+      "heightM": 0.25
+    },
+    {
+      "diameterMm": 200,
+      "capacityTph": 152.3,
+      "maxLengthM": 1042,
+      "newCostRubPerM": 120275,
+      "widthM": 0.88,
+      "heightM": 0.315
+    },
+    {
+      "diameterMm": 250,
+      "capacityTph": 274.9,
+      "maxLengthM": 1379,
+      "newCostRubPerM": 135323,
+      "widthM": 1.05,
+      "heightM": 0.4
+    },
+    {
+      "diameterMm": 300,
+      "capacityTph": 437.4,
+      "maxLengthM": 1718,
+      "newCostRubPerM": 150022,
+      "widthM": 1.15,
+      "heightM": 0.45
+    },
+    {
+      "diameterMm": 400,
+      "capacityTph": 943.1,
+      "maxLengthM": 2477,
+      "newCostRubPerM": 190299,
+      "widthM": 1.37,
+      "heightM": 0.56
+    },
+    {
+      "diameterMm": 500,
+      "capacityTph": 1663.4,
+      "maxLengthM": 3245,
+      "newCostRubPerM": 224137,
+      "widthM": 1.67,
+      "heightM": 0.71
+    },
+    {
+      "diameterMm": 600,
+      "capacityTph": 2627.7,
+      "maxLengthM": 4037,
+      "newCostRubPerM": 264790,
+      "widthM": 1.85,
+      "heightM": 0.8
+    },
+    {
+      "diameterMm": 700,
+      "capacityTph": 3735.1,
+      "maxLengthM": 4775,
+      "newCostRubPerM": 324298,
+      "widthM": 2.05,
+      "heightM": 0.9
+    },
+    {
+      "diameterMm": 800,
+      "capacityTph": 5296.8,
+      "maxLengthM": 5644,
+      "newCostRubPerM": 325996,
+      "widthM": 2.25,
+      "heightM": 1
+    },
+    {
+      "diameterMm": 900,
+      "capacityTph": 7165,
+      "maxLengthM": 6518,
+      "newCostRubPerM": 327693,
+      "widthM": 2.45,
+      "heightM": 1.1
+    },
+    {
+      "diameterMm": 1000,
+      "capacityTph": 9391.8,
+      "maxLengthM": 7419,
+      "newCostRubPerM": 418777,
+      "widthM": 2.65,
+      "heightM": 1.2
+    },
+    {
+      "diameterMm": 1200,
+      "capacityTph": 15012.8,
+      "maxLengthM": 9288,
+      "newCostRubPerM": 428074,
+      "widthM": 3.1,
+      "heightM": 1.425
+    },
+    {
+      "diameterMm": 1400,
+      "capacityTph": 22501.9,
+      "maxLengthM": 11276,
+      "newCostRubPerM": 683417,
+      "widthM": 3.45,
+      "heightM": 1.6
+    }
+  ],
+  "chambers": [
+    {
+      "maxDiameterMm": 200,
+      "costRub": 3000000
+    },
+    {
+      "maxDiameterMm": 500,
+      "costRub": 5000000
+    },
+    {
+      "maxDiameterMm": 1000,
+      "costRub": 8000000
+    },
+    {
+      "maxDiameterMm": 1400,
+      "costRub": 12000000
+    }
+  ],
+  "restrictions": [
+    {
+      "type": "oks",
+      "crossing": "forbidden",
+      "clearanceBands": [
+        {
+          "maxDiameterMm": 400,
+          "clearanceM": 5
+        },
+        {
+          "maxDiameterMm": 800,
+          "clearanceM": 7
+        },
+        {
+          "maxDiameterMm": 1400,
+          "clearanceM": 9
+        }
+      ]
+    },
+    {
+      "type": "park",
+      "crossing": "forbidden",
+      "clearanceM": 1
+    },
+    {
+      "type": "social_area",
+      "crossing": "forbidden",
+      "clearanceM": 1
+    },
+    {
+      "type": "prohibited_site",
+      "crossing": "forbidden",
+      "clearanceM": 1
+    },
+    {
+      "type": "water",
+      "crossing": "forbidden",
+      "clearanceM": 1
+    },
+    {
+      "type": "railway",
+      "crossing": "forbidden",
+      "clearanceM": 1
+    },
+    {
+      "type": "road",
+      "crossing": "special",
+      "clearanceM": 1.5,
+      "minAngleDeg": 45,
+      "extensionEachSideM": 3,
+      "extentReference": "polygon",
+      "specialCoefficient": 1.6
+    },
+    {
+      "type": "tram_tracks",
+      "crossing": "special",
+      "clearanceM": 1.5,
+      "minAngleDeg": 45,
+      "extensionEachSideM": 3,
+      "extentReference": "polygon",
+      "specialCoefficient": 1.75
+    },
+    {
+      "type": "gas_pipeline",
+      "crossing": "special",
+      "clearanceM": 2,
+      "minAngleDeg": null,
+      "extensionEachSideM": 2,
+      "extentReference": "intersection_point",
+      "specialCoefficient": 1.25
+    },
+    {
+      "type": "power_cable",
+      "crossing": "special",
+      "clearanceM": 2,
+      "minAngleDeg": null,
+      "extensionEachSideM": 2,
+      "extentReference": "intersection_point",
+      "specialCoefficient": 1.15
+    },
+    {
+      "type": "heat_network",
+      "crossing": "special",
+      "clearanceM": 1,
+      "minAngleDeg": null,
+      "extensionEachSideM": 2,
+      "extentReference": "intersection_point",
+      "specialCoefficient": 1.05
+    }
+  ],
+  "maxChamberDegree": 4,
+  "existingChamberRadiusM": 10,
+  "maxTurnDeg": 90,
+  "existingChamberTieInRub": 5000000,
+  "unconnectedFixedRub": 100000000,
+  "unconnectedPerTphRub": 500000,
+  "ranking": {
+    "costWeight": 0.7,
+    "lengthWeight": 0.3,
+    "costBaseRub": 25000000,
+    "lengthBaseM": 100
+  }
+}

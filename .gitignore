@@ -1,0 +1,25 @@
+# Java / Maven
+backend/target/
+*.class
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Editors and local settings
+.idea/
+.vscode/
+*.iml
+.env
+.env.*
+!.env.example
+
+# Temporary output and uploaded data
+tmp/
+uploads/
+results/
+*.log
+
+# Portable local tooling (if a participant downloads it into the repository)
+.build-tools/

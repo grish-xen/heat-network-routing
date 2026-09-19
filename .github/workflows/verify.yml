@@ -1,0 +1,22 @@
+name: Verify starter
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+      - run: mvn --batch-mode --no-transfer-progress -f backend/pom.xml verify
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/check_repository.py
+      - run: python -m pip install -r scripts/requirements-checks.txt
+      - run: python -m openapi_spec_validator contracts/openapi.json
+      - run: docker compose config --quiet

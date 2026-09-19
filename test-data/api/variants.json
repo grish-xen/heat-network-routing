@@ -1,0 +1,17 @@
+[
+  {
+    "id": "v1-summary",
+    "object_type": "variant_summary",
+    "variant_id": "v1",
+    "rank": 1,
+    "construction_cost": 26391400,
+    "chamber_construction_cost": 3000000,
+    "existing_chamber_tie_in_count": 1,
+    "existing_chamber_tie_in_cost": 5000000,
+    "unconnected_penalty": 0,
+    "calculated_cost": 26391400,
+    "new_network_length": 200,
+    "score": 1.3389592,
+    "unconnected_oks_ids": []
+  }
+]
