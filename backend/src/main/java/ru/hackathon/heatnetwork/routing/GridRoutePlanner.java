@@ -254,13 +254,45 @@ public final class GridRoutePlanner {
         TieOption tie = options.get(Math.min(optionIndex, options.size() - 1));
         List<Coordinate> path = aStar(tie.coordinate, target.point.getCoordinate(),
                 target.ownOksPolygonId, targetDiameter.get(target.id), stepVariant);
-        if (path == null) {
+        if (path == null || !validOwnOksApproach(path, target)) {
             return null;
         }
         String rootId = rootId(tie, target);
         return new Trace(target.id, tie, path, rootId);
     }
 
+    private boolean validOwnOksApproach(List<Coordinate> path, RoutingContext.Target target) {
+        if (target.ownOksPolygon == null || path.size() < 2) {
+            return true;
+        }
+        int firstInside = -1;
+        for (int i = 0; i < path.size(); i++) {
+            if (target.ownOksPolygon.covers(gf.createPoint(path.get(i)))) {
+                firstInside = i;
+                break;
+            }
+        }
+        if (firstInside < 0) {
+            return true;
+        }
+        if (firstInside == 0) {
+            return false;
+        }
+        // The first point inside the own polygon must be followed only by a
+        // straight segment to the target; no turn or re-entry is permitted.
+        Coordinate entry = path.get(firstInside);
+        Coordinate targetPoint = target.point.getCoordinate();
+        for (int i = firstInside; i < path.size() - 1; i++) {
+            Coordinate a = path.get(i);
+            Coordinate b = path.get(i + 1);
+            double cross = (targetPoint.x - entry.x) * (b.y - a.y)
+                    - (targetPoint.y - entry.y) * (b.x - a.x);
+            if (Math.abs(cross) > 0.001) {
+                return false;
+            }
+        }
+        return path.get(path.size() - 1).distance(targetPoint) <= 0.001;
+    }
     private String rootKey(TieOption tie) {
         return tie.kind.name() + ":" + tie.existingObjectId + ":"
                 + Math.round(tie.coordinate.x * 1000.0) + ":" + Math.round(tie.coordinate.y * 1000.0);
