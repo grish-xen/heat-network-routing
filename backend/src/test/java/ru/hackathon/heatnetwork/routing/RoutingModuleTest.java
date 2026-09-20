@@ -330,7 +330,91 @@ class RoutingModuleTest {
         planner.close();
     }
 
-    // ------------------------------------------------------- in-memory dataset
+    @Test
+    void specialClearanceAllowsCrossingAndRequiresOutsideSegmentLength() {
+        // A road is a special-crossing type: the line may intersect it, but the
+        // surrounding clearance outside the crossing still applies.
+        List<InputObject> objects = new ArrayList<>();
+        objects.add(restriction("R1", "road", square(40, -10, 60, 10)));
+        DefaultSpatialValidator validator = new DefaultSpatialValidator(RulesCatalog.loadDefault());
+
+        Model.CalculatedVariant valid = oneEdgeVariant(
+                new Coordinate(0, 0), new Coordinate(100, 0), "special", 100);
+        assertTrue(validator.validate(new InMemoryDataset(objects), valid).isEmpty(),
+                "straight crossing with extensions should be accepted");
+
+        Model.CalculatedVariant tooShort = oneEdgeVariant(
+                new Coordinate(39, 0), new Coordinate(61, 0), "special", 100);
+        assertTrue(validator.validate(new InMemoryDataset(objects), tooShort).stream()
+                        .anyMatch(d -> "SPECIAL_PASS_VIOLATION".equals(d.code)),
+                "too-short special crossing must fail");
+    }
+
+    @Test
+    void nonSpecialForbiddenTypesAreCheckedAndSpecialCrossingIsNotTreatedAsForbidden() {
+        DefaultSpatialValidator validator = new DefaultSpatialValidator(RulesCatalog.loadDefault());
+        Model.CalculatedVariant crossing = oneEdgeVariant(
+                new Coordinate(0, 0), new Coordinate(100, 0), "base", 100);
+
+        List<InputObject> water = new ArrayList<>();
+        water.add(restriction("W", "water", square(40, -5, 60, 5)));
+        assertTrue(validator.validate(new InMemoryDataset(water), crossing).stream()
+                        .anyMatch(d -> "CLEARANCE_VIOLATION".equals(d.code)),
+                "water crossing must fail");
+
+        List<InputObject> road = new ArrayList<>();
+        road.add(restriction("R", "road", square(40, -5, 60, 5)));
+        assertFalse(validator.validate(new InMemoryDataset(road), crossing).stream()
+                        .anyMatch(d -> "CLEARANCE_VIOLATION".equals(d.code)),
+                "special road crossing is allowed; missing pass metadata is a calculation concern");
+    }
+
+    private Model.CalculatedVariant oneEdgeVariant(Coordinate start, Coordinate end,
+                                                    String method, int diameterMm) {
+        Model.CalculatedVariant variant = new Model.CalculatedVariant();
+        variant.mode = Model.Mode.TWO_D;
+        Model.Node root = new Model.Node();
+        root.id = "r";
+        root.kind = Model.NodeKind.NEW_CHAMBER;
+        root.geometry = GF.createPoint(start);
+        variant.nodes.add(root);
+        Model.Attachment attachment = new Model.Attachment();
+        attachment.rootNodeId = root.id;
+        variant.attachments.add(attachment);
+        Model.Node target = new Model.Node();
+        target.id = "t";
+        target.kind = Model.NodeKind.CONNECTION_POINT;
+        target.geometry = GF.createPoint(end);
+        variant.nodes.add(target);
+        Model.CalculatedEdge edge = new Model.CalculatedEdge();
+        edge.id = "e";
+        edge.fromNodeId = root.id;
+        edge.toNodeId = target.id;
+        edge.geometry = GF.createLineString(new Coordinate[] {start, end});
+        edge.diameterMm = diameterMm;
+        edge.layingMethod = "special".equals(method) ? Model.LayingMethod.SPECIAL : Model.LayingMethod.BASE;
+        edge.lengthM = edge.geometry.getLength();
+        variant.edges.add(edge);
+        return variant;
+    }
+
+    @Test
+    void feedbackRejectedCandidateRemovesNewestTraceOnly() {
+        List<InputObject> objects = new ArrayList<>();
+        objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(600, 0)));
+        objects.add(chamber("C1", new Coordinate(0, 0)));
+        objects.add(connectionPoint(1, 10, new Coordinate(300, 300)));
+        objects.add(connectionPoint(2, 10, new Coordinate(500, 300)));
+        GridRoutePlanner planner = new GridRoutePlanner(new InMemoryDataset(objects), twoD(10), null);
+        Model.RouteCandidate first = planner.next().get();
+        Evaluation rejected = new Evaluation();
+        rejected.candidateId = first.candidateId;
+        planner.feedback(rejected);
+        Model.RouteCandidate after = planner.next().get();
+        assertEquals(1, after.edges.size(), "only the rejected latest target should be retraced");
+        planner.close();
+    }
+
 
     /** Minimal Dataset for tests; module 1 provides the production implementation. */
     static final class InMemoryDataset implements ru.hackathon.heatnetwork.model.Dataset {
