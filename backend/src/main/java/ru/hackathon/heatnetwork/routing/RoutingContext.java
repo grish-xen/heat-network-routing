@@ -146,6 +146,16 @@ public final class RoutingContext {
                 if (obj.geometry instanceof LineString) {
                     int diameter = obj.diameterMm == null ? 0 : obj.diameterMm;
                     ctx.existingLines.add(new HeatLine(obj.id, (LineString) obj.geometry, diameter));
+                    // Crossing an existing network without an attachment is a mandatory
+                    // special pass (table 2), not a free corridor and not a forbidden wall.
+                    RulesCatalog.RestrictionRule networkRule = catalog.rule("heat_network");
+                    if (networkRule != null && diameter > 0) {
+                        double networkClearance = catalog.clearanceFor("heat_network", searchDiameterMm);
+                        double networkHalfWidth = catalog.halfWidthM(diameter);
+                        ctx.obstacles.add(new Obstacle(obj.id, "heat_network", false,
+                                obj.geometry.buffer(networkClearance + halfWidth + networkHalfWidth),
+                                obj.geometry));
+                    }
                 }
             } else if (obj.type == InputType.HEAT_CHAMBER) {
                 if (obj.geometry instanceof Point) {
