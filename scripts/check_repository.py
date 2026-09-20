@@ -139,7 +139,7 @@ try:
     check_refs(api)
     ET.parse(ROOT/'backend/pom.xml')
     for p in ROOT.rglob('*.md'):
-        if 'target' in p.parts: continue
+        if {'target', 'node_modules', 'dist', 'build', 'coverage'} & set(p.parts): continue
         for href in re.findall(r'\]\(([^)]+)\)',p.read_text(encoding='utf-8')):
             if href.startswith(('http:', 'https:', '#')): continue
             require((p.parent/href.split('#')[0]).exists(), f'Broken link: {p}: {href}')
