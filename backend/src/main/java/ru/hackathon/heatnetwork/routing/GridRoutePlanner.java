@@ -15,6 +15,7 @@ import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.Point;
 import ru.hackathon.heatnetwork.model.Dataset;
 import ru.hackathon.heatnetwork.model.Model.Attachment;
 import ru.hackathon.heatnetwork.model.Model.Edge;
@@ -71,6 +72,8 @@ public final class GridRoutePlanner {
     private int targetCursor = 0;
     private boolean emptyCandidateEmitted = false;
     private boolean closed = false;
+    /** Target represented by the last candidate returned from next(). */
+    private ObjectId lastEmittedTarget;
 
     private static final class Trace {
         final ObjectId targetId;
@@ -182,6 +185,7 @@ public final class GridRoutePlanner {
                 continue;
             }
             accept(trace);
+            lastEmittedTarget = targetId;
             candidateCounter++;
             return Optional.of(assembleCandidate());
         }
@@ -201,24 +205,10 @@ public final class GridRoutePlanner {
         }
         // A rejected candidate drops its newest trace; the affected target reroutes
         // with the next attempt (different tie option and grid step).
-        int newest = candidateCounter;
-        ObjectId newestTarget = null;
-        for (Map.Entry<ObjectId, Trace> entry : acceptedTraces.entrySet()) {
-            String id = entry.getValue().rootId + "|" + entry.getKey();
-            if (id.endsWith("|" + entry.getKey())) {
-                newestTarget = entry.getKey();
-            }
-        }
-        // The candidateId encodes the sequence; map "grid-<n>" to the last traced target.
-        if (evaluation.candidateId != null && acceptedTraces.size() > 0) {
-            ObjectId last = null;
-            for (ObjectId id : orderedTargets) {
-                if (acceptedTraces.containsKey(id)) {
-                    last = id;
-                }
-            }
-            newestTarget = last;
-        }
+        // A rejected evaluation always corresponds to the candidate returned by the
+        // immediately preceding next() call. Do not infer this from map iteration order:
+        // target order is flow-sorted, while the latest trace may be any target after retries.
+        ObjectId newestTarget = lastEmittedTarget;
         if (newestTarget != null) {
             Trace removed = acceptedTraces.remove(newestTarget);
             connected.put(newestTarget, Boolean.FALSE);
@@ -297,11 +287,22 @@ public final class GridRoutePlanner {
         double tol = 1e-6;
         for (RoutingContext.HeatLine line : context.existingLines()) {
             Coordinate[] coords = line.line.getCoordinates();
-            if (chamber.point.getCoordinate().distance(coords[0]) <= tol) {
+            Point chamberPoint = chamber.point;
+            if (chamberPoint.distance(line.line) > tol) {
+                continue;
+            }
+            // A chamber at a line endpoint consumes one adjacency; a chamber
+            // lying on the interior splits the existing line and consumes two.
+            if (chamberPoint.getCoordinate().distance(coords[0]) <= tol) {
                 degree++;
             }
-            if (chamber.point.getCoordinate().distance(coords[coords.length - 1]) <= tol) {
+            if (chamberPoint.getCoordinate().distance(coords[coords.length - 1]) <= tol) {
                 degree++;
+            }
+            if (chamberPoint.distance(line.line) <= tol
+                    && chamberPoint.getCoordinate().distance(coords[0]) > tol
+                    && chamberPoint.getCoordinate().distance(coords[coords.length - 1]) > tol) {
+                degree += 2;
             }
         }
         return degree;
