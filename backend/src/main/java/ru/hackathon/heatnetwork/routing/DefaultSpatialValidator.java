@@ -226,6 +226,10 @@ public final class DefaultSpatialValidator implements SpatialValidator {
                      dataset.objects(ru.hackathon.heatnetwork.model.Model.InputType.RESTRICTION)) {
             stream.forEach(obj -> restrictions.add(new Restriction(obj.id, obj.restrictionType, obj.geometry)));
         }
+        try (java.util.stream.Stream<ru.hackathon.heatnetwork.model.Model.InputObject> stream =
+                     dataset.objects(ru.hackathon.heatnetwork.model.Model.InputType.HEAT_NETWORK)) {
+            stream.forEach(obj -> restrictions.add(new Restriction(obj.id, "heat_network", obj.geometry)));
+        }
 
         // Target nodes and their own OKS polygons (exempt final approach).
         Map<ObjectId, Geometry> ownOksByTarget = new HashMap<>();
@@ -274,21 +278,51 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         }
     }
 
-    /** A special pass must extend beyond the obstacle boundary on both sides (table 2). */
+    /** A special pass must be a straight special edge, satisfy the angle rule, and extend beyond the obstacle. */
     private void checkSpecialPassGeometry(CalculatedEdge edge, Restriction restriction,
                                           RulesCatalog.RestrictionRule rule, List<Diagnostic> diagnostics) {
         LineString line = edge.geometry;
         if (!line.intersects(restriction.geometry)) {
-            return; // no crossing — nothing special to check here
+            return;
+        }
+        if (edge.layingMethod != ru.hackathon.heatnetwork.model.Model.LayingMethod.SPECIAL) {
+            diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
+                    "Edge " + edge.id + " crosses " + restriction.type + " without special laying method"));
+            return;
+        }
+        Coordinate[] coordinates = line.getCoordinates();
+        if (coordinates.length != 2) {
+            diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
+                    "Special edge " + edge.id + " must be one straight segment"));
+            return;
+        }
+        if (rule.minAngleDeg != null && restriction.geometry instanceof LineString) {
+            double angle = crossingAngle(line, (LineString) restriction.geometry);
+            if (angle + TOL < rule.minAngleDeg) {
+                diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
+                        "Edge " + edge.id + " crosses " + restriction.type
+                                + " at " + angle + " degrees; minimum is " + rule.minAngleDeg));
+            }
         }
         double extension = rule.extensionEachSideM == null ? 0.0 : rule.extensionEachSideM;
-        // Total edge length must exceed the crossed span by 2*extension.
         double crossedSpan = line.intersection(restriction.geometry).getLength();
         if (crossedSpan > TOL && line.getLength() < crossedSpan + 2 * extension - TOL) {
-            diagnostics.add(diag(null, "SPECIAL_PASS_VIOLATION",
+            diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
                     "Edge " + edge.id + " special pass over " + restriction.id
                             + " does not extend " + extension + " m beyond the boundary"));
         }
+    }
+
+    private double crossingAngle(LineString route, LineString restriction) {
+        Coordinate a = route.getCoordinateN(0);
+        Coordinate b = route.getCoordinateN(1);
+        Coordinate c = restriction.getCoordinateN(0);
+        Coordinate d = restriction.getCoordinateN(restriction.getNumPoints() - 1);
+        double routeAngle = Math.atan2(b.y - a.y, b.x - a.x);
+        double restrictionAngle = Math.atan2(d.y - c.y, d.x - c.x);
+        double degrees = Math.toDegrees(Math.abs(routeAngle - restrictionAngle));
+        degrees %= 180.0;
+        return degrees > 90.0 ? 180.0 - degrees : degrees;
     }
 
     /** Crossing the own OKS polygon is allowed only by one final straight approach to the target. */
