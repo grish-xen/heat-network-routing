@@ -1,4 +1,4 @@
-export type ApiMode = 'fixture' | 'http'
+import type { ApiMode } from '../shared/api/create-api'
 
 export function App({ apiMode }: { apiMode: ApiMode }) {
   return (
