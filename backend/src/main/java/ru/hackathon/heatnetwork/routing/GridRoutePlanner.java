@@ -115,8 +115,10 @@ public final class GridRoutePlanner {
         this.maxCandidates = Math.max(1, options.maxCandidates);
 
         List<InputObject> objects = new ArrayList<>();
-        try (java.util.stream.Stream<InputObject> stream = dataset.objects(null)) {
-            stream.forEach(objects::add);
+        for (InputType type : InputType.values()) {
+            try (java.util.stream.Stream<InputObject> stream = dataset.objects(type)) {
+                stream.forEach(objects::add);
+            }
         }
         this.context = RoutingContext.build(objects, this.catalog, guessSearchDiameter(objects, this.catalog));
 
@@ -140,16 +142,24 @@ public final class GridRoutePlanner {
     }
 
     private static int guessSearchDiameter(List<InputObject> objects, RulesCatalog catalog) {
+        double totalFlow = 0.0;
         int max = 200;
         for (InputObject obj : objects) {
             if (obj.type == InputType.OKS_CONNECTION_POINT && obj.flowTph != null) {
+                totalFlow += obj.flowTph.doubleValue();
                 RulesCatalog.DiameterRow row = catalog.minimalForFlow(obj.flowTph.doubleValue());
                 if (row != null) {
                     max = Math.max(max, row.diameterMm);
                 }
             }
         }
-        return Math.min(max, 500);
+        // A shared trunk carries the sum of all downstream flows. Use the largest
+        // catalog diameter required by that total as the conservative search buffer.
+        RulesCatalog.DiameterRow trunk = catalog.minimalForFlow(totalFlow);
+        if (trunk != null) {
+            max = Math.max(max, trunk.diameterMm);
+        }
+        return max;
     }
 
     private int estimateDiameter(double flowTph) {

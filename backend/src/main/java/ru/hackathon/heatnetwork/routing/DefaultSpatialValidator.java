@@ -60,6 +60,7 @@ public final class DefaultSpatialValidator implements SpatialValidator {
             nodeById.put(node.id, node);
         }
         checkTreeTopology(variant, nodeById, diagnostics);
+        checkEdgeEndpoints(variant, nodeById, diagnostics);
         checkTurns(variant, diagnostics);
         checkEdgeCrossings(variant, diagnostics);
         checkRestrictions(dataset, variant, nodeById, diagnostics);
@@ -139,6 +140,26 @@ public final class DefaultSpatialValidator implements SpatialValidator {
             if (isCamera && deg > catalog.maxChamberDegree()) {
                 diagnostics.add(diag(node.inputObjectId, "TOPOLOGY_VIOLATION",
                         "Camera " + node.id + " exceeds " + catalog.maxChamberDegree() + " adjacencies"));
+            }
+        }
+    }
+
+    private void checkEdgeEndpoints(CalculatedVariant variant, Map<String, Node> nodeById,
+                                    List<Diagnostic> diagnostics) {
+        for (Edge edge : variant.edges) {
+            if (edge.geometry == null || edge.geometry.getNumPoints() < 2) {
+                diagnostics.add(diag(null, "INVALID_GEOMETRY", "Edge " + edge.id + " is not a valid LineString"));
+                continue;
+            }
+            Node from = nodeById.get(edge.fromNodeId);
+            Node to = nodeById.get(edge.toNodeId);
+            if (from != null && from.geometry.distance(edge.geometry.getStartPoint()) > TOL) {
+                diagnostics.add(diag(from.inputObjectId, "TOPOLOGY_VIOLATION",
+                        "Edge " + edge.id + " start does not coincide with from node"));
+            }
+            if (to != null && to.geometry.distance(edge.geometry.getEndPoint()) > TOL) {
+                diagnostics.add(diag(to.inputObjectId, "TOPOLOGY_VIOLATION",
+                        "Edge " + edge.id + " end does not coincide with to node"));
             }
         }
     }
