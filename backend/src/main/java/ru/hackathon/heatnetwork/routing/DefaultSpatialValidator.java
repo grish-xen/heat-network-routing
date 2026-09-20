@@ -287,6 +287,11 @@ public final class DefaultSpatialValidator implements SpatialValidator {
                     } else {
                         checkForbiddenClearance(edge, restriction, diagnostics);
                     }
+                } else if ("heat_network".equals(restriction.type)
+                        && isAttachmentToExistingNetwork(edge, restriction, variant, nodeById)
+                        && onlyTouchesAtStart(edge, restriction.geometry)) {
+                    // The endpoint at the selected attachment is the permitted tie-in.
+                    continue;
                 } else if ("forbidden".equals(rule.crossing)) {
                     checkForbiddenClearance(edge, restriction, diagnostics);
                 } else {
@@ -299,7 +304,37 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         }
     }
 
-    /** A special pass must be a straight special edge, satisfy the angle rule, and extend beyond the obstacle. */
+    private boolean onlyTouchesAtStart(CalculatedEdge edge, Geometry existingLine) {
+        if (!existingLine.intersects(edge.geometry)) {
+            return false;
+        }
+        Geometry intersection = existingLine.intersection(edge.geometry);
+        for (Coordinate coordinate : intersection.getCoordinates()) {
+            if (coordinate.distance(edge.geometry.getStartPoint().getCoordinate()) > TOL) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isAttachmentToExistingNetwork(CalculatedEdge edge, Restriction restriction,
+                                                  CalculatedVariant variant, Map<String, Node> nodeById) {
+        Node from = nodeById.get(edge.fromNodeId);
+        if (from == null || (from.kind != NodeKind.EXISTING_CHAMBER && from.kind != NodeKind.NEW_CHAMBER)) {
+            return false;
+        }
+        for (Attachment attachment : variant.attachments) {
+            if (attachment.rootNodeId.equals(from.id)
+                    && attachment.existingObjectId != null
+                    && attachment.existingObjectId.equals(restriction.id)
+                    && from.geometry.distance(edge.geometry.getStartPoint()) <= TOL) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
     private void checkSpecialPassGeometry(CalculatedEdge edge, Restriction restriction,
                                           RulesCatalog.RestrictionRule rule, List<Diagnostic> diagnostics) {
         LineString line = edge.geometry;
