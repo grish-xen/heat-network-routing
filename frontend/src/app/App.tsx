@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { JobStatus } from '../features/job-status/JobStatus'
 import { useJob } from '../features/job-status/use-job'
 import { JobUpload } from '../features/job-upload/JobUpload'
+import { NetworkMap } from '../features/network-map/NetworkMap'
 import { ServiceStatus } from '../features/service-status/ServiceStatus'
 import type { HeatNetworkApi } from '../shared/api/contracts'
 import type { ApiMode } from '../shared/api/create-api'
@@ -64,11 +65,17 @@ export function App({ apiMode, api }: { apiMode: ApiMode; api: HeatNetworkApi })
           )}
         </section>
         <section className="map-placeholder" aria-label="Карта результата">
-          <div className="map-grid" aria-hidden="true" />
-          <div className="map-empty-state">
-            <span className="map-pin" aria-hidden="true" />
-            <p>Карта появится после запуска расчёта</p>
-          </div>
+          {activeJob ? (
+            <NetworkMap api={api} jobId={activeJob.jobId} layer="input" />
+          ) : (
+            <>
+              <div className="map-grid" aria-hidden="true" />
+              <div className="map-empty-state">
+                <span className="map-pin" aria-hidden="true" />
+                <p>Карта появится после запуска расчёта</p>
+              </div>
+            </>
+          )}
         </section>
       </main>
     </div>
