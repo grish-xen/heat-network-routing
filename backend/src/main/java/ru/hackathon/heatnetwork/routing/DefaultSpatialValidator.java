@@ -305,12 +305,33 @@ public final class DefaultSpatialValidator implements SpatialValidator {
             }
         }
         double extension = rule.extensionEachSideM == null ? 0.0 : rule.extensionEachSideM;
-        double crossedSpan = line.intersection(restriction.geometry).getLength();
-        if (crossedSpan > TOL && line.getLength() < crossedSpan + 2 * extension - TOL) {
+        Geometry intersection = line.intersection(restriction.geometry);
+        Coordinate[] crossings = intersection.getCoordinates();
+        if (crossings.length == 0) {
+            return;
+        }
+        if (restriction.geometry instanceof LineString && crossedPointTooShort(line, crossings[0], extension)) {
+            diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
+                    "Edge " + edge.id + " does not extend " + extension
+                            + " m on both sides of the line crossing"));
+        } else if (!(restriction.geometry instanceof LineString)
+                && line.getLength() < intersection.getLength() + 2 * extension - TOL) {
             diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
                     "Edge " + edge.id + " special pass over " + restriction.id
                             + " does not extend " + extension + " m beyond the boundary"));
         }
+    }
+
+    private boolean crossedPointTooShort(LineString line, Coordinate crossing, double extension) {
+        Coordinate a = line.getCoordinateN(0);
+        Coordinate b = line.getCoordinateN(1);
+        double length = a.distance(b);
+        if (length <= TOL) {
+            return true;
+        }
+        double along = ((crossing.x - a.x) * (b.x - a.x)
+                + (crossing.y - a.y) * (b.y - a.y)) / length;
+        return along < extension - TOL || length - along < extension - TOL;
     }
 
     private double crossingAngle(LineString route, LineString restriction) {
