@@ -5,6 +5,7 @@ import { JobStatus } from '../features/job-status/JobStatus'
 import { useJob } from '../features/job-status/use-job'
 import { JobUpload } from '../features/job-upload/JobUpload'
 import { NetworkMap } from '../features/network-map/NetworkMap'
+import { ResultWorkspace } from '../features/results/ResultWorkspace'
 import { ServiceStatus } from '../features/service-status/ServiceStatus'
 import type { HeatNetworkApi } from '../shared/api/contracts'
 import type { ApiMode } from '../shared/api/create-api'
@@ -12,20 +13,37 @@ import type { Job } from '../shared/model/api'
 
 interface ActiveJobProps {
   readonly api: HeatNetworkApi
+  readonly apiMode: ApiMode
   readonly initialJob: Job
   readonly onReset: () => void
 }
 
-function ActiveJob({ api, initialJob, onReset }: ActiveJobProps) {
-  const job = useJob(api, initialJob)
-  return <JobStatus job={job.data ?? initialJob} isPollingError={job.isRefetchError} onReset={onReset} />
+function ActiveJob({ api, apiMode, initialJob, onReset }: ActiveJobProps) {
+  const query = useJob(api, initialJob)
+  const job = query.data ?? initialJob
+  if (job.status === 'SUCCEEDED' && job.stage === 'DONE') {
+    return <ResultWorkspace api={api} jobId={job.jobId} demo={apiMode === 'fixture'} onReset={onReset} />
+  }
+  return (
+    <main className="workspace" aria-label="Рабочая область">
+      <section className="workspace-panel" aria-label="Статус расчёта">
+        <JobStatus job={job} isPollingError={query.isRefetchError} onReset={onReset} />
+      </section>
+      <section className="map-placeholder" aria-label="Карта исходных данных">
+        <NetworkMap api={api} jobId={job.jobId} layer="input" />
+      </section>
+    </main>
+  )
 }
 
 export function App({ apiMode, api }: { apiMode: ApiMode; api: HeatNetworkApi }) {
   const [activeJob, setActiveJob] = useState<Job | null>(null)
   const queryClient = useQueryClient()
   const reset = () => {
-    if (activeJob) queryClient.removeQueries({ queryKey: ['job', activeJob.jobId], exact: true })
+    if (activeJob) {
+      queryClient.removeQueries({ queryKey: ['job', activeJob.jobId], exact: true })
+      queryClient.removeQueries({ queryKey: ['variants', activeJob.jobId], exact: true })
+    }
     setActiveJob(null)
   }
 
@@ -48,36 +66,28 @@ export function App({ apiMode, api }: { apiMode: ApiMode; api: HeatNetworkApi })
           )}
         </div>
       </header>
+      {activeJob ? (
+        <ActiveJob api={api} apiMode={apiMode} initialJob={activeJob} onReset={reset} />
+      ) : (
       <main className="workspace" aria-label="Рабочая область">
         <section className="workspace-panel" aria-label="Параметры расчёта">
-          {activeJob ? (
-            <ActiveJob api={api} initialJob={activeJob} onReset={reset} />
-          ) : (
-            <>
-              <p className="section-kicker">Новый расчёт</p>
-              <h2>Подключение объектов к сети</h2>
-              <p className="intro-copy">
-                Загрузите единый GeoJSON. Сервис проверит данные, построит варианты
-                трасс и подготовит их для сравнения на карте.
-              </p>
-              <JobUpload api={api} onCreated={setActiveJob} />
-            </>
-          )}
+          <p className="section-kicker">Новый расчёт</p>
+          <h2>Подключение объектов к сети</h2>
+          <p className="intro-copy">
+            Загрузите единый GeoJSON. Сервис проверит данные, построит варианты
+            трасс и подготовит их для сравнения на карте.
+          </p>
+          <JobUpload api={api} onCreated={setActiveJob} />
         </section>
         <section className="map-placeholder" aria-label="Карта результата">
-          {activeJob ? (
-            <NetworkMap api={api} jobId={activeJob.jobId} layer="input" />
-          ) : (
-            <>
-              <div className="map-grid" aria-hidden="true" />
-              <div className="map-empty-state">
-                <span className="map-pin" aria-hidden="true" />
-                <p>Карта появится после запуска расчёта</p>
-              </div>
-            </>
-          )}
+          <div className="map-grid" aria-hidden="true" />
+          <div className="map-empty-state">
+            <span className="map-pin" aria-hidden="true" />
+            <p>Карта появится после запуска расчёта</p>
+          </div>
         </section>
       </main>
+      )}
     </div>
   )
 }

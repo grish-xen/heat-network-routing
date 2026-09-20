@@ -17,12 +17,14 @@ interface NetworkMapProps {
   readonly layer: MapQuery['layer']
   readonly variantId?: ObjectId
   readonly onViewportChange?: (bbox: ViewportBbox) => void
+  readonly onUnavailable?: (reason: 'GPU_UNAVAILABLE') => void
 }
 
-export function NetworkMap({ api, jobId, layer, variantId, onViewportChange }: NetworkMapProps) {
+export function NetworkMap({ api, jobId, layer, variantId, onViewportChange, onUnavailable }: NetworkMapProps) {
   const container = useRef<HTMLDivElement>(null)
   const adapter = useRef<NetworkMapAdapter | null>(null)
   const callback = useRef(onViewportChange)
+  const unavailableCallback = useRef(onUnavailable)
   const [bbox, setBbox] = useState(INITIAL_BBOX)
   const [mapError, setMapError] = useState<string | null>(null)
   const query: MapQuery = {
@@ -31,6 +33,7 @@ export function NetworkMap({ api, jobId, layer, variantId, onViewportChange }: N
   const features = useMapFeatures(api, jobId, query)
 
   useEffect(() => { callback.current = onViewportChange }, [onViewportChange])
+  useEffect(() => { unavailableCallback.current = onUnavailable }, [onUnavailable])
   useEffect(() => {
     if (!container.current) return
     let timer: number | undefined
@@ -46,7 +49,12 @@ export function NetworkMap({ api, jobId, layer, variantId, onViewportChange }: N
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не удалось запустить карту'
       queueMicrotask(() => {
-        if (active) setMapError(message)
+        if (active) {
+          setMapError(message)
+          if (error instanceof Error && error.name === 'MapUnsupportedError') {
+            unavailableCallback.current?.('GPU_UNAVAILABLE')
+          }
+        }
       })
     }
     return () => {

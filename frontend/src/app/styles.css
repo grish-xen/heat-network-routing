@@ -515,6 +515,119 @@ h2 {
   transform: translateX(-50%);
 }
 
+.result-panel {
+  padding-top: 2rem;
+  overflow-y: auto;
+}
+
+.result-panel h2 {
+  font-size: clamp(1.5rem, 2.4vw, 2.1rem);
+}
+
+.variant-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1.4rem 0;
+}
+
+.variant-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.22rem 0.65rem;
+  padding: 0.8rem;
+  cursor: pointer;
+  background: #f6f7f3;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+}
+
+.variant-card input {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+}
+
+.variant-card--selected {
+  background: #f1f8ef;
+  border-color: var(--focus);
+  box-shadow: inset 3px 0 var(--focus);
+}
+
+.variant-rank {
+  grid-row: span 3;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  color: #fff;
+  background: var(--surface-strong);
+  border-radius: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.variant-card > span:not(.variant-rank) {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.variant-card small {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 1rem 0;
+}
+
+.metric-grid > div {
+  min-width: 0;
+  padding: 0.7rem;
+  background: #f7f8f4;
+  border-radius: 0.5rem;
+}
+
+.metric-grid dt {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  line-height: 1.25;
+}
+
+.metric-grid dd {
+  margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
+  font-family: 'Onest', system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.result-actions {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.download-link {
+  text-decoration: none;
+}
+
+.result-actions .button--secondary {
+  margin-top: 0;
+}
+
+.result-loading {
+  display: flex;
+  min-height: 30rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  background: var(--surface-raised);
+}
+
 @media (max-width: 900px) {
   .app-shell {
     padding: 0;
