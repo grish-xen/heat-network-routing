@@ -12,8 +12,10 @@ import static org.junit.jupiter.api.Assertions.*;
         properties = "heat-network.jobs.storage-directory=${java.io.tmpdir}/heat-smoke-${random.uuid}")
 class ApplicationSmokeTest {
     @Autowired private TestRestTemplate http;
+    @Autowired private ru.hackathon.heatnetwork.output.ResultExporter exporter;
 
     @Test void startsServerAndDocumentsTheImplementedHealthEndpoint() {
+        assertNotNull(exporter);
         ResponseEntity<JsonNode> health = http.getForEntity("/api/health", JsonNode.class);
         assertEquals(200, health.getStatusCodeValue());
         assertNotNull(health.getBody());
