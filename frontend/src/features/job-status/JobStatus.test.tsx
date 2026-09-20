@@ -30,5 +30,6 @@ describe('JobStatus', () => {
     expect(screen.getByRole('heading', { name: /модуль расчёта ещё подключается/i })).toBeVisible()
     expect(screen.getByText('PROCESSING_UNAVAILABLE')).toBeVisible()
     expect(screen.getByText(/9007199254740993/)).toBeVisible()
+    expect(screen.getByText('Ошибка').closest('li')).toHaveAttribute('aria-current', 'step')
   })
 })

@@ -46,4 +46,14 @@ describe('loadMapFeatures', () => {
       .mockResolvedValueOnce({ type: 'FeatureCollection', features: [], nextCursor: 'same' })
     await expect(loadMapFeatures(apiWith(getMapPage), 'job-1', query, new AbortController().signal)).rejects.toThrow(/цикл/i)
   })
+
+  it('rejects invalid bounds before making a request', async () => {
+    const getMapPage = vi.fn()
+    const invalidQuery: MapQuery = { ...query, bbox: [37.5, 55.6, 37.4, 55.7] }
+
+    await expect(
+      loadMapFeatures(apiWith(getMapPage), 'job-1', invalidQuery, new AbortController().signal),
+    ).rejects.toThrow(/возрастать/i)
+    expect(getMapPage).not.toHaveBeenCalled()
+  })
 })

@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
 import type { MapPage, MapQuery } from '../../shared/model/api'
-import { mapQueryKey } from './map-query'
+import { mapQueryKey, serializeBbox } from './map-query'
 
 function abortIfNeeded(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException('Запрос карты отменён', 'AbortError')
@@ -14,6 +14,8 @@ export async function loadMapFeatures(
   query: MapQuery,
   signal: AbortSignal,
 ): Promise<MapPage> {
+  const [minLon, minLat, maxLon, maxLat] = query.bbox
+  serializeBbox({ minLon, minLat, maxLon, maxLat })
   const limit = query.limit ?? 1000
   if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
     throw new Error('Размер страницы карты должен быть от 1 до 5000')

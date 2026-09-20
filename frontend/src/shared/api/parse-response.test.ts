@@ -18,6 +18,14 @@ describe('lossless API parsing', () => {
     ).toThrow(/безопасное целое/i)
   })
 
+  it('rejects a measurement that cannot be represented without precision loss', () => {
+    expect(() =>
+      parseVariantsText(
+        '[{"id":1,"object_type":"variant_summary","variant_id":1,"rank":1,"construction_cost":9007199254740993,"chamber_construction_cost":1,"existing_chamber_tie_in_count":1,"existing_chamber_tie_in_cost":1,"unconnected_penalty":1,"calculated_cost":1,"new_network_length":1,"score":1,"unconnected_oks_ids":[]}]',
+      ),
+    ).toThrow(/без потери точности/i)
+  })
+
   it('parses a typed map page and preserves its numeric ID', () => {
     const page = parseMapPageText(
       '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[37.6,55.7]},"properties":{"id":9007199254740993,"object_type":"source"}}],"nextCursor":null}',

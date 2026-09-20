@@ -3,13 +3,14 @@ import { formatObjectId } from '../../shared/model/object-id'
 import { Alert } from '../../shared/ui/Alert'
 import { Button } from '../../shared/ui/Button'
 
-const stages: readonly { value: Exclude<JobStage, 'FAILED'>; label: string }[] = [
+const stages: readonly { value: JobStage; label: string }[] = [
   { value: 'QUEUED', label: 'В очереди' },
   { value: 'VALIDATING', label: 'Проверка данных' },
   { value: 'ROUTING', label: 'Построение трасс' },
   { value: 'CALCULATING', label: 'Расчёт стоимости' },
   { value: 'EXPORTING', label: 'Подготовка результата' },
   { value: 'DONE', label: 'Готово' },
+  { value: 'FAILED', label: 'Ошибка' },
 ]
 
 const stageIndex = (stage: JobStage) => stages.findIndex(({ value }) => value === stage)
@@ -44,7 +45,11 @@ export function JobStatus({ job, isPollingError = false, onReset }: JobStatusPro
       )}
       <ol className="stage-list" aria-label="Этапы расчёта">
         {stages.map((stage, index) => {
-          const state = job.stage === 'FAILED' ? 'pending' : index < currentIndex ? 'done' : index === currentIndex ? 'current' : 'pending'
+          const state = index === currentIndex
+            ? 'current'
+            : job.stage !== 'FAILED' && index < currentIndex
+              ? 'done'
+              : 'pending'
           return (
             <li key={stage.value} className={`stage stage--${state}`} aria-current={state === 'current' ? 'step' : undefined}>
               <span className="stage-marker" aria-hidden="true">{state === 'done' ? '✓' : index + 1}</span>

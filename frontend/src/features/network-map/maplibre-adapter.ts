@@ -8,7 +8,7 @@ import {
   type GeoJSONSource,
   type MapLayerMouseEvent,
 } from 'maplibre-gl'
-import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import type { MapPage } from '../../shared/model/api'
@@ -89,6 +89,7 @@ export function createMapLibreAdapter(
   }
   let pending: MapPage = { type: 'FeatureCollection', features: [], nextCursor: null }
   let ready = false
+  const visibility = new Map<LayerGroup, boolean>()
 
   map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
   map.addControl(new ScaleControl({ unit: 'metric' }), 'bottom-right')
@@ -105,6 +106,9 @@ export function createMapLibreAdapter(
           : {}),
         paint: paintFor(definition),
       } as never)
+      if (visibility.get(definition.group) === false) {
+        map.setLayoutProperty(definition.id, 'visibility', 'none')
+      }
     }
     ready = true
   })
@@ -135,6 +139,8 @@ export function createMapLibreAdapter(
       if (ready) (map.getSource(SOURCE_ID) as GeoJSONSource).setData(toGeoJson(page) as never)
     },
     setLayerGroupVisibility(group, visible) {
+      visibility.set(group, visible)
+      if (!ready) return
       for (const layer of MAP_LAYER_DEFINITIONS.filter((item) => item.group === group)) {
         map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none')
       }

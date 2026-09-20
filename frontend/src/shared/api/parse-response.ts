@@ -1,4 +1,4 @@
-import { isLosslessNumber, parse } from 'lossless-json'
+import { isLosslessNumber, isSafeNumber, parse } from 'lossless-json'
 
 import type {
   ApiErrorBody,
@@ -46,11 +46,11 @@ export function expectFiniteNumber(value: unknown, path: string): number {
   if (!isLosslessNumber(value)) {
     throw new ResponseContractError(`${path}: ожидается число`)
   }
-  const number = Number(value.toString())
-  if (!Number.isFinite(number)) {
-    throw new ResponseContractError(`${path}: ожидается конечное число`)
+  const text = value.toString()
+  if (!isSafeNumber(text, { approx: false })) {
+    throw new ResponseContractError(`${path}: число невозможно представить без потери точности`)
   }
-  return number
+  return Number(text)
 }
 
 export function expectInteger(value: unknown, path: string): number {
