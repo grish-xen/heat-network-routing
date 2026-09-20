@@ -416,8 +416,19 @@ class RoutingModuleTest {
     }
 
 
-    /** Minimal Dataset for tests; module 1 provides the production implementation. */
-    static final class InMemoryDataset implements ru.hackathon.heatnetwork.model.Dataset {
+    @Test
+    void plannerUsesTypedDatasetStreamsOnly() {
+        List<InputObject> objects = new ArrayList<>();
+        objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(600, 0)));
+        objects.add(chamber("C1", new Coordinate(0, 0)));
+        objects.add(connectionPoint(1, 10, new Coordinate(300, 300)));
+        GridRoutePlanner planner = new GridRoutePlanner(new StrictDataset(objects), twoD(2), null);
+        assertTrue(planner.next().isPresent(), "planner must use per-type Dataset streams");
+        planner.close();
+    }
+
+
+    static class InMemoryDataset implements ru.hackathon.heatnetwork.model.Dataset {
         private final Map<ObjectId, InputObject> objects = new ConcurrentHashMap<>();
 
         InMemoryDataset(List<InputObject> input) {
@@ -446,6 +457,20 @@ class RoutingModuleTest {
         @Override
         public void close() {
             // nothing to release
+        }
+    }
+
+    static final class StrictDataset extends InMemoryDataset {
+        StrictDataset(List<InputObject> input) {
+            super(input);
+        }
+
+        @Override
+        public Stream<InputObject> objects(InputType type) {
+            if (type == null) {
+                throw new IllegalArgumentException("Dataset.objects(null) is not part of contract 1.0");
+            }
+            return super.objects(type);
         }
     }
 }
