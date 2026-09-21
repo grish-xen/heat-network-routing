@@ -6,6 +6,7 @@ backend/target/
 frontend/node_modules/
 frontend/dist/
 frontend/build/
+frontend/coverage/
 
 # Editors and local settings
 .idea/
@@ -19,6 +20,7 @@ frontend/build/
 tmp/
 uploads/
 results/
+!frontend/src/features/results/
 *.log
 
 # Portable local tooling (if a participant downloads it into the repository)

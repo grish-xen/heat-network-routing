@@ -1,9 +1,49 @@
 # Frontend
 
-Зона ответственности участника 4. Точный HTTP-контракт — `../contracts/openapi.json`; фактически в backend сейчас работает только `/api/health`.
+Интерфейс участника 4: React 19, TypeScript, Vite, TanStack Query и MapLibre GL. Сценарий включает загрузку GeoJSON, статус асинхронной задачи, карту, сравнение вариантов и потоковое скачивание результата.
 
-Первый экран: загрузка → статус → карта → сравнение вариантов → скачивание GeoJSON. Для независимой работы есть `../test-data/api/job-succeeded.json`, `variants.json`, `map-input.json` и `../test-data/synthetic/two-consumers/expected.geojson`. Подключите их через подменяемый API-адаптер, затем замените адаптер реальными запросами без изменений компонентов карты.
+## Требования и запуск
 
-Карта получает EPSG:4326 и отображает рассчитанные значения. Считающий ДУ/стоимость код находится в backend. Для большого набора используйте `/api/jobs/{jobId}/map` с bbox и постраничной загрузкой. Технические внутренние ID графа и метрические JTS-объекты в браузер не передаются.
+Нужен Node.js `>=22.12` и npm. Из корня репозитория:
 
-Тип входных ID может быть числовым или строковым. Для ID больше безопасного диапазона JavaScript Number нужна обработка без потери точности; не используйте числовую арифметику для идентификаторов. Согласуйте выбор frontend-фреймворка и карты командой; после добавления проекта добавьте его сборку в CI.
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+Vite откроет локальный адрес из терминала. В development без переменной окружения включается `fixture`: в шапке явно показан бейдж «Демонстрационные данные», а стадии задачи проходят автоматически. Пример конфигурации лежит в `.env.example`.
+
+```dotenv
+VITE_API_MODE=fixture
+```
+
+Доступны только два режима:
+
+- `fixture` — автономная демонстрация на файлах из `../test-data`, без копий данных во frontend;
+- `http` — реальные запросы `/api/*`; dev-сервер проксирует их на `http://localhost:8080`.
+
+Production-сборка требует явно задать `VITE_API_MODE=fixture` или `VITE_API_MODE=http`, иначе приложение покажет понятную конфигурационную ошибку при запуске.
+
+## Проверки
+
+```bash
+npm --prefix frontend test
+npm --prefix frontend run lint
+npm --prefix frontend run build -- --mode development
+```
+
+Тесты проверяют lossless-разбор больших числовых ID, HTTP multipart и ошибки, fixture-пагинацию, polling, варианты, bbox/cursor карты, lifecycle MapLibre и fallback без WebGL2.
+
+## Интеграция с backend
+
+Контракт находится в `../contracts/openapi.json`. Сейчас backend реализует `/api/health`, `POST /api/jobs` и `GET /api/jobs/{jobId}`. Валидная загрузка в HTTP-режиме ожидаемо заканчивается `FAILED / PROCESSING_UNAVAILABLE`: это показывается как состояние интеграции, а не заменяется демонстрационным результатом.
+
+Чтобы HTTP-режим показал успешный результат, участнику 1 нужно подключить отмеченные в OpenAPI как planned операции:
+
+- `GET /api/jobs/{jobId}/variants`;
+- `GET /api/jobs/{jobId}/map` с EPSG:4326 bbox, limit и cursor;
+- `GET /api/jobs/{jobId}/result` как потоковый GeoJSON attachment.
+
+`HttpHeatNetworkApi` — единственная граница реальных запросов. ID типа JSON string/number сохраняются посимвольно и различаются по исходному типу; не преобразуйте их в JavaScript `number`. Download реализован обычной ссылкой с `download`, поэтому большой файл не буферизуется кодом интерфейса.
+
+MapLibre использует отдельный worker asset. При отсутствии WebGL2 интерфейс сохраняет выбор вариантов, метрики и скачивание результата.
