@@ -586,7 +586,12 @@ public final class GridRoutePlanner {
             current = cameFrom.get(current);
         }
         Collections.reverse(path);
-        path.set(path.size() - 1, goal);
+        if (path.size() == 1) {
+            // The tie point itself is within reach of the goal: keep it as the start.
+            path.add(goal);
+        } else {
+            path.set(path.size() - 1, goal);
+        }
         return path;
     }
 

@@ -151,6 +151,23 @@ class RoutingModuleTest {
     }
 
     @Test
+    void targetNextToTheTiePointGetsATwoPointEdge() {
+        // The target is closer than 1.5 grid steps to the snapped tie point on the line.
+        List<InputObject> objects = new ArrayList<>();
+        objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(400, 0)));
+        objects.add(connectionPoint(1, 10, new Coordinate(200, 20)));
+
+        GridRoutePlanner planner = new GridRoutePlanner(new InMemoryDataset(objects), twoD(3), null);
+        List<Model.RouteCandidate> candidates = drain(planner);
+
+        assertPointConnected(candidates.get(0), numId(1));
+        LineString geometry = candidates.get(0).edges.get(0).geometry;
+        assertEquals(2, geometry.getNumPoints());
+        assertEquals(20.0, geometry.getLength(), 1e-9);
+        planner.close();
+    }
+
+    @Test
     void plannerRoutesAroundForbiddenPark() {
         // Direct corridor from the line to the target is blocked by a park square.
         List<InputObject> objects = new ArrayList<>();

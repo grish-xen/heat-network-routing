@@ -235,7 +235,8 @@
       "minAngleDeg": null,
       "extensionEachSideM": 2,
       "extentReference": "intersection_point",
-      "specialCoefficient": 1.25
+      "specialCoefficient": 1.25,
+      "profileWidthM": 0.4
     },
     {
       "type": "power_cable",
@@ -244,7 +245,8 @@
       "minAngleDeg": null,
       "extensionEachSideM": 2,
       "extentReference": "intersection_point",
-      "specialCoefficient": 1.15
+      "specialCoefficient": 1.15,
+      "profileWidthM": 0.2
     },
     {
       "type": "heat_network",

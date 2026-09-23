@@ -324,9 +324,11 @@ public final class DefaultSpatialValidator implements SpatialValidator {
             return false;
         }
         for (Attachment attachment : variant.attachments) {
+            // The line carrying a new chamber, or any existing line ending in / passing through
+            // the attachment chamber, meets the new network there by the connection itself.
             if (attachment.rootNodeId.equals(from.id)
-                    && attachment.existingObjectId != null
-                    && attachment.existingObjectId.equals(restriction.id)
+                    && (restriction.id.equals(attachment.existingObjectId)
+                        || from.geometry.distance(restriction.geometry) <= TOL)
                     && from.geometry.distance(edge.geometry.getStartPoint()) <= TOL) {
                 return true;
             }

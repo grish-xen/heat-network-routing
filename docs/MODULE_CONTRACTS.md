@@ -11,7 +11,7 @@
 | `output.ResultExporter` | Dataset + до трёх рассчитанных вариантов одного режима, уже отсортированных → поток GeoJSON | 1 |
 | HTTP API | Загрузка, статусы, варианты, карта, скачивание по `contracts/openapi.json` | 1 и 4 |
 
-`InputParser` реализован классом `GeoJsonInputParser`; возвращается временный дисковый Dataset. Интеграция — [INPUT_MODULE.md](INPUT_MODULE.md). `ResultExporter` реализован классом `GeoJsonResultExporter` для 2D — [OUTPUT_MODULE.md](OUTPUT_MODULE.md). Маршрутизатор, калькулятор и пространственные проверки остаются задачами команды. Общий контракт 1.0 не менялся.
+`InputParser` реализован классом `GeoJsonInputParser`; возвращается временный дисковый Dataset. Интеграция — [INPUT_MODULE.md](INPUT_MODULE.md). `ResultExporter` реализован классом `GeoJsonResultExporter` для 2D — [OUTPUT_MODULE.md](OUTPUT_MODULE.md). `VariantCalculator` реализован классом `DefaultVariantCalculator` для 2D — [CALCULATION_MODULE.md](CALCULATION_MODULE.md). Маршрутизатор и пространственные проверки — `GridRoutePlanner` и `DefaultSpatialValidator`. Общий контракт 1.0 не менялся; в каталог добавлен справочный `profileWidthM` для газопровода и кабеля.
 
 ## Общий запуск
 

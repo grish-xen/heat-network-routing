@@ -68,6 +68,8 @@ public final class RulesCatalog {
         public Double extensionEachSideM;
         public String extentReference;
         public Double specialCoefficient;
+        /** Width of the object's own design profile (table 2 note), null when not given. */
+        public Double profileWidthM;
         public List<ClearanceBand> clearanceBands;
     }
 
@@ -138,6 +140,10 @@ public final class RulesCatalog {
 
     public double maxLengthM(int diameterMm) {
         return row(diameterMm).maxLengthM;
+    }
+
+    public List<RestrictionRule> restrictionRules() {
+        return Collections.unmodifiableList(restrictions);
     }
 
     public RestrictionRule rule(String restrictionType) {
