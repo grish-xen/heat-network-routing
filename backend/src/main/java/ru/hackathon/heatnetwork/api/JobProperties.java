@@ -16,6 +16,8 @@ public class JobProperties {
     @Min(0) @Max(1000) private int queueCapacity = 48;
     @Min(1) @Max(3221225472L) private long maxFileBytes = 3L * 1024 * 1024 * 1024;
     @NotNull private Duration retention = Duration.ofHours(24);
+    @Min(1) @Max(10000) private int maxCandidates = 100;
+    private long searchSeed = 0;
 
     public Path getStorageDirectory() { return storageDirectory; }
     public void setStorageDirectory(Path value) { storageDirectory = value; }
@@ -27,4 +29,8 @@ public class JobProperties {
     public void setMaxFileBytes(long value) { maxFileBytes = value; }
     public Duration getRetention() { return retention; }
     public void setRetention(Duration value) { retention = value; }
+    public int getMaxCandidates() { return maxCandidates; }
+    public void setMaxCandidates(int value) { maxCandidates = value; }
+    public long getSearchSeed() { return searchSeed; }
+    public void setSearchSeed(long value) { searchSeed = value; }
 }

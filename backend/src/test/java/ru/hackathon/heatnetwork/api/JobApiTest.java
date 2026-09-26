@@ -37,7 +37,7 @@ class JobApiTest {
         registry.add("heat-network.input.storage-directory", () -> temporary.resolve("datasets").toString());
     }
 
-    @Test void uploadReturns202AndLocationThenActualValidationState() throws Exception {
+    @Test void uploadCalculatesRealVariantsAndDownloadsMatchingGeoJson() throws Exception {
         byte[] fixture;
         try (InputStream input = getClass().getResourceAsStream("/fixtures/synthetic/two-consumers/input.geojson")) {
             assertNotNull(input);
@@ -54,8 +54,34 @@ class JobApiTest {
         String location = "/api/jobs/" + job.path("jobId").asText();
         assertEquals(location, accepted.getHeaders().getLocation().toString());
         JsonNode result = completed(location);
-        assertEquals("FAILED", result.path("status").asText());
-        assertEquals("PROCESSING_UNAVAILABLE", result.at("/diagnostics/0/code").asText());
+        assertEquals("SUCCEEDED", result.path("status").asText(), result.toString());
+        assertEquals("DONE", result.path("stage").asText());
+        ResponseEntity<JsonNode> variants = http.getForEntity(location + "/variants", JsonNode.class);
+        assertEquals(200, variants.getStatusCodeValue());
+        assertEquals("no-store", variants.getHeaders().getCacheControl());
+        assertEquals(1, variants.getBody().size(), "complete candidate replaces intermediate partial result");
+        assertEquals(0, variants.getBody().get(0).path("unconnected_oks_ids").size());
+        ResponseEntity<byte[]> download = http.getForEntity(location + "/result", byte[].class);
+        assertEquals(200, download.getStatusCodeValue());
+        assertEquals("application/geo+json", download.getHeaders().getContentType().toString());
+        assertTrue(download.getHeaders().getFirst("Content-Disposition").startsWith("attachment;"));
+        assertEquals(download.getBody().length, download.getHeaders().getContentLength());
+        JsonNode collection = mapper.readTree(download.getBody());
+        assertEquals("FeatureCollection", collection.path("type").asText());
+        int summaries = 0;
+        for (JsonNode feature : collection.path("features")) {
+            if ("variant_summary".equals(feature.at("/properties/object_type").asText())) {
+                JsonNode view = variants.getBody().get(summaries++);
+                JsonNode exported = feature.path("properties");
+                assertEquals(exported.size(), view.size());
+                exported.fields().forEachRemaining(field -> {
+                    JsonNode actual = view.path(field.getKey());
+                    if (field.getValue().isNumber()) assertEquals(0, field.getValue().decimalValue().compareTo(actual.decimalValue()), field.getKey());
+                    else assertEquals(field.getValue(), actual, field.getKey());
+                });
+            }
+        }
+        assertEquals(variants.getBody().size(), summaries);
         assertEquals("no-store", http.getForEntity(location, JsonNode.class).getHeaders().getCacheControl());
         assertContract("/api/jobs", "post", "202", job);
         assertContract("/api/jobs/{jobId}", "get", "200", result);
@@ -66,6 +92,8 @@ class JobApiTest {
         assertEquals(202, accepted.getStatusCodeValue());
         JsonNode result = completed(accepted.getHeaders().getLocation().toString());
         assertEquals("INVALID_INPUT", result.at("/diagnostics/0/code").asText());
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/variants", JsonNode.class));
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/result", JsonNode.class));
         assertFalse(result.toString().contains(temporary.toString()));
         assertContract("/api/jobs/{jobId}", "get", "200", result);
     }
@@ -106,17 +134,32 @@ class JobApiTest {
         assertError(415, "INVALID_INPUT", http.postForEntity("/api/jobs", "text", JsonNode.class));
     }
 
-    @Test void liveSwaggerDescribesUploadAndStatusButNotPlannedMapAndResults() {
+    @Test void liveSwaggerDescribesResultsButNotPlannedMap() {
         JsonNode spec = http.getForObject("/v3/api-docs", JsonNode.class);
         assertNotNull(spec);
         assertEquals("createJob", spec.at("/paths/~1api~1jobs/post/operationId").asText());
         assertTrue(spec.at("/paths/~1api~1jobs/post/responses").has("202"));
         assertTrue(spec.path("paths").has("/api/jobs/{jobId}"));
+        assertEquals("listVariants", spec.at("/paths/~1api~1jobs~1{jobId}~1variants/get/operationId").asText());
+        assertEquals("downloadResult", spec.at("/paths/~1api~1jobs~1{jobId}~1result/get/operationId").asText());
         assertFalse(spec.path("paths").has("/api/jobs/{jobId}/map"));
     }
 
+    @Test void missingResultsUseJson404ForBothEndpoints() {
+        for (String id : new String[] {UUID.randomUUID().toString(), "invalid-id"}) {
+            for (String endpoint : new String[] {"variants", "result"}) {
+                ResponseEntity<JsonNode> response = http.getForEntity("/api/jobs/" + id + "/" + endpoint, JsonNode.class);
+                assertError(404, "JOB_NOT_FOUND", response);
+                assertTrue(MediaType.APPLICATION_JSON.isCompatibleWith(response.getHeaders().getContentType()));
+            }
+        }
+    }
+
     private JsonNode completed(String location) {
-        eventually(() -> "FAILED".equals(http.getForObject(location, JsonNode.class).path("status").asText()));
+        eventually(() -> {
+            String status = http.getForObject(location, JsonNode.class).path("status").asText();
+            return "FAILED".equals(status) || "SUCCEEDED".equals(status);
+        });
         return http.getForObject(location, JsonNode.class);
     }
 

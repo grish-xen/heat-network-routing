@@ -4,17 +4,22 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.*;
 import java.time.Instant;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.hackathon.heatnetwork.model.Dataset;
+import ru.hackathon.heatnetwork.model.Model.CalculatedVariant;
+import ru.hackathon.heatnetwork.output.ResultExporter;
 
 /** Small durable status files, one at a time; no in-memory registry of completed jobs. */
 final class FileJobStore implements AutoCloseable {
@@ -48,6 +53,67 @@ final class FileJobStore implements AutoCloseable {
     }
 
     Path input(String id) { return path(id, ".geojson"); }
+
+    /** Export is private until both files exist and the caller persists SUCCEEDED. */
+    void writeResult(String id, Dataset dataset, List<CalculatedVariant> variants, ResultExporter exporter) throws IOException {
+        Path temporary = path(id, ".result.geojson.tmp");
+        Path summaries = path(id, ".variants.json.tmp");
+        try {
+            try (OutputStream output = Files.newOutputStream(temporary, StandardOpenOption.CREATE_NEW)) {
+                exporter.write(dataset, variants, output);
+            }
+            CalculationCoordinator.interrupted();
+            List<VariantSummaryView> views = ResultSummaries.read(temporary, mapper);
+            if (views.size() != variants.size()) throw new IOException("Missing exported summary");
+            mapper.writeValue(summaries.toFile(), views);
+            CalculationCoordinator.interrupted();
+            publish(temporary, path(id, ".result.geojson"));
+            publish(summaries, path(id, ".variants.json"));
+        } finally {
+            Files.deleteIfExists(temporary);
+            Files.deleteIfExists(summaries);
+        }
+    }
+
+    private static void publish(Path temporary, Path target) throws IOException {
+        try { Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+        catch (AtomicMoveNotSupportedException exception) { Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING); }
+    }
+
+    synchronized List<VariantSummaryView> variants(String id) throws IOException {
+        requireResult(id);
+        try (InputStream input = Files.newInputStream(path(id, ".variants.json"))) {
+            return Arrays.asList(mapper.readValue(input, VariantSummaryView[].class));
+        }
+    }
+
+    synchronized Download download(String id) throws IOException {
+        requireResult(id);
+        Path result = path(id, ".result.geojson");
+        long size = Files.size(result);
+        return new Download(Files.newInputStream(result), size);
+    }
+
+    private void requireResult(String id) throws IOException {
+        if (!validId(id) || !Files.isRegularFile(path(id, ".json"))) {
+            throw new ApiException(404, "JOB_NOT_FOUND", "Задача не найдена или срок её хранения истёк.");
+        }
+        if (get(id).status != JobView.Status.SUCCEEDED) {
+            throw new ApiException(409, "RESULT_NOT_READY", "Результат доступен только после успешного завершения задачи.");
+        }
+    }
+
+    static final class Download {
+        final InputStream stream;
+        final long length;
+        Download(InputStream stream, long length) { this.stream = stream; this.length = length; }
+    }
+
+    void removeResult(String id) throws IOException {
+        for (String suffix : List.of(".result.geojson.tmp", ".variants.json.tmp", ".result.geojson", ".variants.json")) {
+            Files.deleteIfExists(path(id, suffix));
+        }
+    }
 
     // Windows cannot always replace a file while another thread is reading it. Status I/O
     // is small and serialized; large uploads and Dataset work do not take this monitor.
@@ -84,6 +150,7 @@ final class FileJobStore implements AutoCloseable {
 
     synchronized void delete(String id) throws IOException {
         removeInput(id);
+        removeResult(id);
         Files.deleteIfExists(path(id, ".json.tmp"));
         Files.deleteIfExists(path(id, ".json"));
     }
@@ -92,13 +159,22 @@ final class FileJobStore implements AutoCloseable {
         forEachStatus(id -> {
             try {
                 JobView job = get(id);
-                if (!job.terminal()) save(job.failed(List.of(new ApiError("SERVER_RESTARTED",
-                        "Сервер был перезапущен до завершения задачи. Загрузите файл повторно."))));
+                if (!job.terminal()) {
+                    job = job.failed(List.of(new ApiError("SERVER_RESTARTED",
+                            "Сервер был перезапущен до завершения задачи. Загрузите файл повторно.")));
+                    save(job);
+                }
+                if (job.status == JobView.Status.SUCCEEDED
+                        && (!Files.isRegularFile(path(id, ".result.geojson")) || !Files.isRegularFile(path(id, ".variants.json")))) {
+                    job = job.failed(List.of(new ApiError("RESULT_UNAVAILABLE", "Сохранённый результат утрачен. Загрузите файл повторно.")));
+                    save(job);
+                }
+                if (job.status != JobView.Status.SUCCEEDED) removeResult(id);
                 removeInput(id);
             } catch (IOException exception) { LOG.error("Cannot recover job {}", id, exception); }
         });
         // Only exact server UUID filenames are eligible; unrelated files are untouched.
-        for (String suffix : List.of(".geojson", ".json.tmp")) {
+        for (String suffix : List.of(".geojson", ".json.tmp", ".result.geojson.tmp", ".variants.json.tmp")) {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*" + suffix)) {
                 for (Path file : files) {
                     String name = file.getFileName().toString();

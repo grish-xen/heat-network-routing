@@ -3,7 +3,7 @@
   "info": {
     "title": "Heat Network Routing team API",
     "version": "1.0.0",
-    "description": "Version 1 integration contract. Health, upload and job status are implemented. Routing/calculation/export are not connected: valid inputs currently end in FAILED with PROCESSING_UNAVAILABLE. Variants, result download and map remain planned."
+    "description": "Version 1 integration contract. Health, upload, job status, ranked variants and streamed result download are implemented. Jobs run parsing, routing, calculation, validation and export. Map remains planned."
   },
   "paths": {
     "/api/health": {
@@ -158,7 +158,7 @@
             }
           }
         },
-        "description": "Exactly one nonempty multipart file named file. mode defaults to 2d when omitted. An empty/unknown/duplicate mode is invalid; depth is currently unsupported. The original filename is ignored. Default file limit: 3 GiB; request limit: file limit + 1 MiB. Limits may be lowered by server configuration."
+        "description": "Accepts the upload, then asynchronously validates, routes, calculates and exports. SUCCEEDED means the result and summaries have been saved. Partial connection is reported in summaries and diagnostics."
       }
     },
     "/api/jobs/{jobId}": {
@@ -230,7 +230,7 @@
       ],
       "get": {
         "operationId": "listVariants",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "responses": {
           "200": {
             "description": "Ranked summaries using official snake_case fields.",
@@ -265,6 +265,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Storage or internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -282,7 +292,7 @@
       ],
       "get": {
         "operationId": "downloadResult",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "responses": {
           "200": {
             "description": "Streamed GeoJSON attachment, up to 500 MiB.",
@@ -307,6 +317,16 @@
           },
           "409": {
             "description": "Result not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage or internal error",
             "content": {
               "application/json": {
                 "schema": {
@@ -436,7 +456,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, PROCESSING_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. This is an extensible string, not a closed enum."
+            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, RESULT_NOT_READY, ROUTE_NOT_FOUND, OUTPUT_LIMIT_EXCEEDED, RESULT_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. Legacy PROCESSING_UNAVAILABLE may remain in stored jobs from older versions. This is an extensible string, not a closed enum."
           },
           "message": {
             "type": "string"
