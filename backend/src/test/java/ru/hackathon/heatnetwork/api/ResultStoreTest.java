@@ -27,6 +27,11 @@ class ResultStoreTest {
             store.save(job);
             assertEquals(409, assertThrows(ApiException.class, () -> store.download(id)).status);
             store.writeResult(id, dataset, List.of(new CalculatedVariant()), fixtureExporter());
+            try (InputStream input = getClass().getResourceAsStream("/fixtures/synthetic/two-consumers/input.geojson")) {
+                assertNotNull(input);
+                Files.copy(input, store.input(id));
+            }
+            store.writeMaps(id);
             assertEquals(409, assertThrows(ApiException.class, () -> store.variants(id)).status);
             store.save(job.succeeded(List.of()));
             assertEquals(1, store.variants(id).size());

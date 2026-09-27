@@ -96,6 +96,11 @@ class JobServiceTest {
             assertEquals(JobView.Status.SUCCEEDED, restarted.get(jobId).status);
             assertEquals(1, restarted.variants(jobId).size());
             try (InputStream download = restarted.download(jobId).stream) { assertArrayEquals(originalResult, download.readAllBytes()); }
+            try (MapArchive.Page page = restarted.map(jobId, new MapQuery(jobId, "input", "-180,-90,180,90", null, null, null))) {
+                java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+                page.writeTo(output);
+                assertEquals(5, mapper.readTree(output.toByteArray()).path("features").size());
+            }
         } finally { restarted.destroy(); }
     }
 

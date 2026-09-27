@@ -3,7 +3,7 @@
   "info": {
     "title": "Heat Network Routing team API",
     "version": "1.0.0",
-    "description": "Version 1 integration contract. Health, upload, job status, ranked variants and streamed result download are implemented. Jobs run parsing, routing, calculation, validation and export. Map remains planned."
+    "description": "Version 1 integration contract. Health, upload, job status, ranked variants, streamed result download and paginated map are implemented. Jobs parse, route, calculate, validate, export and persist map archives."
   },
   "paths": {
     "/api/health": {
@@ -351,7 +351,7 @@
       ],
       "get": {
         "operationId": "getMapPage",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "parameters": [
           {
             "name": "layer",
@@ -368,7 +368,7 @@
           {
             "name": "variantId",
             "in": "query",
-            "description": "Required for result layer; server-issued variant IDs are strings.",
+            "description": "Required for result, forbidden for input. Server-issued variant IDs are strings, from this job.",
             "schema": {
               "type": "string"
             }
@@ -377,7 +377,7 @@
             "name": "bbox",
             "in": "query",
             "required": true,
-            "description": "minLon,minLat,maxLon,maxLat in EPSG:4326",
+            "description": "minLon,minLat,maxLon,maxLat in EPSG:4326; finite numbers, longitude [-180,180], latitude [-90,90], min < max. No antimeridian wrapping.",
             "schema": {
               "type": "string"
             }
@@ -397,7 +397,8 @@
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Opaque cursor from nextCursor, bound to all query parameters. Omit on first page or when viewport changes."
           }
         ],
         "responses": {
@@ -440,8 +441,29 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "A single feature cannot fit in the 8 MiB page budget (MAP_FEATURE_TOO_LARGE). Smaller bbox does not clip the feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
-        }
+        },
+        "description": "Available after SUCCEEDED. Selects features whose WGS84 bounding rectangles intersect bbox, without clipping. Input positions are 2D; result excludes summaries. Pages contain at most limit features and 8 MiB including envelope. Reuse nextCursor with the same job, layer, variantId, bbox and limit. Null nextCursor ends the query. Legacy jobs without map archives require reupload."
       }
     }
   },
@@ -456,7 +478,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, RESULT_NOT_READY, ROUTE_NOT_FOUND, OUTPUT_LIMIT_EXCEEDED, RESULT_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. Legacy PROCESSING_UNAVAILABLE may remain in stored jobs from older versions. This is an extensible string, not a closed enum."
+            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, RESULT_NOT_READY, ROUTE_NOT_FOUND, OUTPUT_LIMIT_EXCEEDED, RESULT_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. Legacy PROCESSING_UNAVAILABLE may remain in stored jobs from older versions. This is an extensible string, not a closed enum. Map errors include INVALID_LAYER, INVALID_BBOX, INVALID_VARIANT, INVALID_LIMIT, INVALID_CURSOR, INVALID_MAP_QUERY, VARIANT_NOT_FOUND, MAP_DATA_UNAVAILABLE and MAP_FEATURE_TOO_LARGE."
           },
           "message": {
             "type": "string"
@@ -488,7 +510,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/MapFeature"
-            }
+            },
+            "maxItems": 5000
           },
           "nextCursor": {
             "type": "string",

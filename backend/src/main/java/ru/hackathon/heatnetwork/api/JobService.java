@@ -106,6 +106,16 @@ public final class JobService implements DisposableBean {
     public List<VariantSummaryView> variants(String id) throws IOException { return store.variants(id); }
     FileJobStore.Download download(String id) throws IOException { return store.download(id); }
 
+    MapArchive.Page map(String id, MapQuery query) throws IOException {
+        int variant = store.mapVariant(id, query);
+        MapArchive.Reader archive = store.openMap(id, query);
+        try { return archive.select(query, variant); }
+        catch (IOException | RuntimeException exception) {
+            try { archive.close(); } catch (IOException closing) { exception.addSuppressed(closing); }
+            throw exception;
+        }
+    }
+
     private void copyUpload(MultipartFile file, String id) throws IOException {
         // The original filename never participates in path construction.
         try (InputStream input = file.getInputStream();
@@ -135,6 +145,7 @@ public final class JobService implements DisposableBean {
                     List<CalculatedVariant> variants = coordinator.calculate(dataset, stage -> store.save(job.running(stage)));
                     store.save(job.running(JobView.Stage.EXPORTING));
                     store.writeResult(job.jobId, dataset, variants, exporter);
+                    store.writeMaps(job.jobId);
                     CalculationCoordinator.interrupted();
                     int missing = variants.get(0).unconnectedPointIds.size();
                     terminal = job.succeeded(missing == 0 ? List.of() : List.of(new ApiError("ROUTE_NOT_FOUND",

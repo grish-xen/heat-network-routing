@@ -41,11 +41,11 @@ VariantCalculator считает расход, выбирает ДУ с учёт
 
 ## HTTP-контракт
 
-Полный документ: `contracts/openapi.json`. Реализованы `/api/health`, POST `/api/jobs`, GET `/api/jobs/{jobId}`, GET `/api/jobs/{jobId}/variants` и GET `/api/jobs/{jobId}/result`. Публичный Swagger документирует эти операции. Карта пока planned. Поведение, очередь, хранение и подключение координатора описаны в [JOB_API.md](JOB_API.md).
+Полный документ: `contracts/openapi.json`. Реализованы `/api/health`, POST `/api/jobs`, GET `/api/jobs/{jobId}`, GET `/api/jobs/{jobId}/variants`, GET `/api/jobs/{jobId}/result` и GET `/api/jobs/{jobId}/map`. Публичный Swagger документирует эти операции. Правила страниц карты — [MAP_API.md](MAP_API.md). Поведение, очередь, хранение и подключение координатора описаны в [JOB_API.md](JOB_API.md).
 
 Фоновая обработка проходит полную цепочку. SUCCEEDED/DONE появляется после сохранения результата и сводок. Ошибочный вход заканчивается диагностикой InputParser; отсутствие принятого варианта — ROUTE_NOT_FOUND, превышение размера экспорта — OUTPUT_LIMIT_EXCEEDED. Ошибки перезапуска: SERVER_RESTARTED, JOB_INTERRUPTED и RESULT_UNAVAILABLE при утрате сохранённого результата; HTTP-коды приведены в OpenAPI. Структуры Job/Error не изменены; уточнены Location, Cache-Control, Retry-After и ответы 415/500.
 
-POST `/api/jobs` сохраняет multipart-файл и отвечает 202; валидация и расчёт продолжаются асинхронно. GET `/api/jobs/{jobId}` отдаёт статус. GET `/api/jobs/{jobId}/variants` отдаёт сводки с официальными snake_case полями. GET `/api/jobs/{jobId}/result` скачивает GeoJSON потоком. Будущий GET `/api/jobs/{jobId}/map` должен возвращать страницу пространственных объектов по bbox, слою и варианту, чтобы frontend не загружал весь файл до 3 ГБ в память браузера.
+POST `/api/jobs` сохраняет multipart-файл и отвечает 202; валидация и расчёт продолжаются асинхронно. GET `/api/jobs/{jobId}` отдаёт статус. GET `/api/jobs/{jobId}/variants` отдаёт сводки с официальными snake_case полями. GET `/api/jobs/{jobId}/result` скачивает GeoJSON потоком. GET `/api/jobs/{jobId}/map` возвращает страницу пространственных объектов по bbox, слою и варианту. Архив карты сохраняется после закрытия Dataset. Страница ограничена числом объектов и 8 МиБ; frontend отдельно должен контролировать суммарный объём загруженных страниц.
 
 Во время реализации каждая операция отмечается implemented в спецификации и покрывается проверкой фактического ответа. Новые общие поля/изменение семантики — через PR с обновлением модели, контрактов, примеров и затронутых вызовов.
 

@@ -25,6 +25,7 @@ import ru.hackathon.heatnetwork.output.ResultExporter;
 final class FileJobStore implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(FileJobStore.class);
     private static final Pattern ID = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    private static final List<String> MAP_FILES = List.of(".map-input.data", ".map-input.index", ".map-result.data", ".map-result.index");
     private final Path directory;
     private final ObjectMapper mapper;
     private final FileChannel lockChannel;
@@ -80,6 +81,43 @@ final class FileJobStore implements AutoCloseable {
         catch (AtomicMoveNotSupportedException exception) { Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING); }
     }
 
+    void writeMaps(String id) throws IOException {
+        List<VariantSummaryView> views;
+        try (InputStream input = Files.newInputStream(path(id, ".variants.json"))) {
+            views = Arrays.asList(mapper.readValue(input, VariantSummaryView[].class));
+        }
+        List<String> variants = new java.util.ArrayList<>();
+        for (VariantSummaryView view : views) variants.add(view.variantId.value().textValue());
+        try {
+            MapArchive.build(input(id), path(id, ".map-input.data.tmp"), path(id, ".map-input.index.tmp"), null, mapper);
+            MapArchive.build(path(id, ".result.geojson"), path(id, ".map-result.data.tmp"), path(id, ".map-result.index.tmp"), variants, mapper);
+            CalculationCoordinator.interrupted();
+            for (String suffix : MAP_FILES) publish(path(id, suffix + ".tmp"), path(id, suffix));
+        } finally {
+            for (String suffix : MAP_FILES) Files.deleteIfExists(path(id, suffix + ".tmp"));
+        }
+    }
+
+    // Acquire the file handles before retention cleanup can delete them; scanning does not hold this monitor.
+    synchronized MapArchive.Reader openMap(String id, MapQuery query) throws IOException {
+        requireResult(id);
+        String prefix = ".map-" + query.layer;
+        if (!Files.isRegularFile(path(id, prefix + ".data")) || !Files.isRegularFile(path(id, prefix + ".index"))) {
+            throw new ApiException(409, "MAP_DATA_UNAVAILABLE", "Данные карты не сохранены для этой задачи. Загрузите исходный файл повторно.");
+        }
+        return new MapArchive.Reader(path(id, prefix + ".data"), path(id, prefix + ".index"));
+    }
+
+    synchronized int mapVariant(String id, MapQuery query) throws IOException {
+        requireResult(id);
+        if ("input".equals(query.layer)) return 0;
+        List<VariantSummaryView> views = variants(id);
+        for (int i = 0; i < views.size(); i++) {
+            if (query.variantId.equals(views.get(i).variantId.value().textValue())) return i + 1;
+        }
+        throw new ApiException(404, "VARIANT_NOT_FOUND", "Вариант не найден в этой задаче.");
+    }
+
     synchronized List<VariantSummaryView> variants(String id) throws IOException {
         requireResult(id);
         try (InputStream input = Files.newInputStream(path(id, ".variants.json"))) {
@@ -111,6 +149,10 @@ final class FileJobStore implements AutoCloseable {
 
     void removeResult(String id) throws IOException {
         for (String suffix : List.of(".result.geojson.tmp", ".variants.json.tmp", ".result.geojson", ".variants.json")) {
+            Files.deleteIfExists(path(id, suffix));
+        }
+        for (String suffix : MAP_FILES) {
+            Files.deleteIfExists(path(id, suffix + ".tmp"));
             Files.deleteIfExists(path(id, suffix));
         }
     }
@@ -174,7 +216,8 @@ final class FileJobStore implements AutoCloseable {
             } catch (IOException exception) { LOG.error("Cannot recover job {}", id, exception); }
         });
         // Only exact server UUID filenames are eligible; unrelated files are untouched.
-        for (String suffix : List.of(".geojson", ".json.tmp", ".result.geojson.tmp", ".variants.json.tmp")) {
+        for (String suffix : List.of(".geojson", ".json.tmp", ".result.geojson.tmp", ".variants.json.tmp",
+                ".map-input.data.tmp", ".map-input.index.tmp", ".map-result.data.tmp", ".map-result.index.tmp")) {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*" + suffix)) {
                 for (Path file : files) {
                     String name = file.getFileName().toString();
