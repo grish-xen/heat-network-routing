@@ -21,7 +21,7 @@ jobs:
         timeout-minutes: 5
         shell: bash
         run: |
-          java -jar backend/target/heat-network-routing-0.1.0-SNAPSHOT.jar \
+          java -Xmx512m -jar backend/target/heat-network-routing-0.1.0-SNAPSHOT.jar \
             --server.address=127.0.0.1 --server.port=18080 \
             --heat-network.jobs.storage-directory="$RUNNER_TEMP/smoke-jobs" \
             --heat-network.input.storage-directory="$RUNNER_TEMP/smoke-datasets" \
@@ -43,6 +43,11 @@ jobs:
           fi
           python scripts/smoke_api.py --base-url http://127.0.0.1:18080 \
             --require-full-connection --report "$RUNNER_TEMP/api-smoke.json" || {
+              cat "$RUNNER_TEMP/api-smoke-server.log"
+              exit 1
+            }
+          python scripts/check_concurrent_api.py --base-url http://127.0.0.1:18080 \
+            --clients 4 --report "$RUNNER_TEMP/api-concurrent.json" || {
               cat "$RUNNER_TEMP/api-smoke-server.log"
               exit 1
             }
