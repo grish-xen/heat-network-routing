@@ -267,6 +267,12 @@ public final class DefaultSpatialValidator implements SpatialValidator {
             });
         }
 
+        Map<String, List<CalculatedEdge>> incoming = new HashMap<>();
+        Map<String, List<CalculatedEdge>> outgoing = new HashMap<>();
+        for (CalculatedEdge edge : variant.edges) {
+            incoming.computeIfAbsent(edge.toNodeId, key -> new ArrayList<>()).add(edge);
+            outgoing.computeIfAbsent(edge.fromNodeId, key -> new ArrayList<>()).add(edge);
+        }
         for (CalculatedEdge edge : variant.edges) {
             Node endNode = nodeById.get(edge.toNodeId);
             for (Restriction restriction : restrictions) {
@@ -298,7 +304,7 @@ public final class DefaultSpatialValidator implements SpatialValidator {
                     // Special-pass types: the crossing itself is allowed; the sizing and
                     // straightness of the pass are enforced by the calculation module.
                     // The validator still flags passes shorter than the required extension.
-                    checkSpecialPassGeometry(edge, restriction, rule, diagnostics);
+                    checkSpecialPassGeometry(edge, restriction, rule, nodeById, incoming, outgoing, diagnostics);
                 }
             }
         }
@@ -338,7 +344,10 @@ public final class DefaultSpatialValidator implements SpatialValidator {
 
 
     private void checkSpecialPassGeometry(CalculatedEdge edge, Restriction restriction,
-                                          RulesCatalog.RestrictionRule rule, List<Diagnostic> diagnostics) {
+                                          RulesCatalog.RestrictionRule rule, Map<String, Node> nodeById,
+                                          Map<String, List<CalculatedEdge>> incoming,
+                                          Map<String, List<CalculatedEdge>> outgoing,
+                                          List<Diagnostic> diagnostics) {
         LineString line = edge.geometry;
         if (!line.intersects(restriction.geometry)) {
             return;
@@ -354,6 +363,9 @@ public final class DefaultSpatialValidator implements SpatialValidator {
                     "Special edge " + edge.id + " must be one straight segment"));
             return;
         }
+        // Overlaps split one physical pass into several priced edges (clarification 8).
+        // Restore only the straight, connected continuation marked for this restriction.
+        line = completeSpecialPass(edge, restriction.id, nodeById, incoming, outgoing);
         if (rule.minAngleDeg != null && restriction.geometry instanceof LineString) {
             double angle = crossingAngle(line, (LineString) restriction.geometry);
             if (angle + TOL < rule.minAngleDeg) {
@@ -368,16 +380,73 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         if (crossings.length == 0) {
             return;
         }
-        if (restriction.geometry instanceof LineString && crossedPointTooShort(line, crossings[0], extension)) {
-            diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
-                    "Edge " + edge.id + " does not extend " + extension
-                            + " m on both sides of the line crossing"));
-        } else if (!(restriction.geometry instanceof LineString)
-                && line.getLength() < intersection.getLength() + 2 * extension - TOL) {
-            diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
-                    "Edge " + edge.id + " special pass over " + restriction.id
-                            + " does not extend " + extension + " m beyond the boundary"));
+        for (Coordinate crossing : crossings) {
+            if (crossedPointTooShort(line, crossing, extension)) {
+                diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
+                        "Edge " + edge.id + " special pass does not extend " + extension
+                                + " m on both sides of the crossing"));
+                break;
+            }
         }
+    }
+
+    private LineString completeSpecialPass(CalculatedEdge edge, ObjectId restrictionId,
+                                           Map<String, Node> nodeById,
+                                           Map<String, List<CalculatedEdge>> incoming,
+                                           Map<String, List<CalculatedEdge>> outgoing) {
+        Coordinate start = edge.geometry.getCoordinateN(0);
+        Coordinate end = edge.geometry.getCoordinateN(1);
+        if (!edge.crossedObjectIds.contains(restrictionId)) {
+            return edge.geometry;
+        }
+        Set<String> visited = new HashSet<>();
+        visited.add(edge.id);
+        for (boolean upstream : new boolean[] {true, false}) {
+            CalculatedEdge current = edge;
+            while (true) {
+                String jointId = upstream ? current.fromNodeId : current.toNodeId;
+                Node joint = nodeById.get(jointId);
+                List<CalculatedEdge> before = incoming.get(jointId);
+                List<CalculatedEdge> after = outgoing.get(jointId);
+                if (joint == null || joint.kind != NodeKind.TECHNICAL_NODE
+                        || before == null || before.size() != 1 || after == null || after.size() != 1) {
+                    break;
+                }
+                CalculatedEdge next = upstream ? before.get(0) : after.get(0);
+                if (visited.contains(next.id)
+                        || next.layingMethod != ru.hackathon.heatnetwork.model.Model.LayingMethod.SPECIAL
+                        || !next.crossedObjectIds.contains(restrictionId)
+                        || next.geometry == null || next.geometry.getNumPoints() != 2) {
+                    break;
+                }
+                Coordinate a = next.geometry.getCoordinateN(0);
+                Coordinate b = next.geometry.getCoordinateN(1);
+                Coordinate jointPosition = upstream ? start : end;
+                if (jointPosition.distance(upstream ? b : a) > TOL) {
+                    break;
+                }
+                Coordinate extended = upstream ? a : b;
+                double dx = end.x - start.x;
+                double dy = end.y - start.y;
+                double length = Math.hypot(dx, dy);
+                if (length <= TOL) {
+                    break;
+                }
+                double along = ((extended.x - start.x) * dx + (extended.y - start.y) * dy) / length;
+                double offset = Math.abs((extended.x - start.x) * dy - (extended.y - start.y) * dx) / length;
+                if (offset > TOL || (upstream ? along >= -TOL : along <= length + TOL)) {
+                    break;
+                }
+                if (upstream) {
+                    start = extended;
+                } else {
+                    end = extended;
+                }
+                visited.add(next.id);
+                current = next;
+            }
+        }
+        return edge.geometry.getFactory().createLineString(new Coordinate[] {start, end});
     }
 
     private boolean crossedPointTooShort(LineString line, Coordinate crossing, double extension) {

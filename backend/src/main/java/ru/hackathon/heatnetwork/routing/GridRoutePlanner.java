@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
@@ -50,7 +51,7 @@ public final class GridRoutePlanner {
 
     /** Attempts per target before it is treated as unreachable by this planner. */
     static final int MAX_TRACES_PER_TARGET = 6;
-    private static final int MAX_EXPANSIONS = 150_000;
+    private static final int MAX_EXPANSIONS = 300_000;
     private static final double COINCIDENT_M = 0.001;
 
     private final GeometryFactory gf = new GeometryFactory();
@@ -460,26 +461,20 @@ public final class GridRoutePlanner {
         Map<String, String> cameFrom = new HashMap<>();
         Map<String, Coordinate> coords = new HashMap<>();
         Map<String, Double> fScore = new HashMap<>();
-        Set<String> open = new HashSet<>();
 
         String startKey = key(start, step);
         gScore.put(startKey, 0.0);
         coords.put(startKey, start);
         fScore.put(startKey, start.distance(goal));
+
+        // PriorityQueue for O(log n) min extraction instead of O(n) linear scan.
+        PriorityQueue<String> open = new PriorityQueue<>(Comparator.comparingDouble(fScore::get));
         open.add(startKey);
 
         int expansions = 0;
         String currentKey = startKey;
         while (!open.isEmpty()) {
-            currentKey = null;
-            double bestF = Double.POSITIVE_INFINITY;
-            for (String candidate : open) {
-                double f = fScore.getOrDefault(candidate, Double.POSITIVE_INFINITY);
-                if (f < bestF) {
-                    bestF = f;
-                    currentKey = candidate;
-                }
-            }
+            currentKey = open.poll();
             if (currentKey == null) {
                 return null;
             }
@@ -490,7 +485,6 @@ public final class GridRoutePlanner {
             if (++expansions > MAX_EXPANSIONS) {
                 return null;
             }
-            open.remove(currentKey);
 
             Coordinate previous = cameFrom.containsKey(currentKey)
                     ? coords.get(cameFrom.get(currentKey)) : null;

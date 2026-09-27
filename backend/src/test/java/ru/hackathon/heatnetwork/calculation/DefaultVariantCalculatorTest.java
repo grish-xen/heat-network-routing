@@ -212,7 +212,7 @@ class DefaultVariantCalculatorTest {
                 .existingRoot("root", "C", xy(0, 0)).target("p", id(1), xy(100, 0))
                 .edge("e", "root", "p", xy(0, 0), xy(100, 0)).build();
 
-        CalculatedVariant variant = accepted(withoutValidator.evaluate(scene, candidate, Mode.TWO_D));
+        CalculatedVariant variant = accepted(calculator.evaluate(scene, candidate, Mode.TWO_D));
 
         List<Double> lengths = variant.edges.stream().map(e -> e.lengthM).collect(Collectors.toList());
         assertEquals(5, lengths.size(), lengths.toString());
