@@ -50,4 +50,12 @@ describe('FixtureHeatNetworkApi', () => {
       }),
     ).rejects.toBeInstanceOf(ApiClientError)
   })
+
+  it('returns the union of input and selected result bounds', async () => {
+    const api = new FixtureHeatNetworkApi()
+    const job = await api.createJob(new File(['{}'], 'input.geojson'), '2d')
+
+    await expect(api.getMapBounds(job.jobId, { kind: 'string', value: 'v1' }))
+      .resolves.toEqual([37.41023676760975, 55.664625324104904, 37.411844036191525, 55.665993195333016])
+  })
 })

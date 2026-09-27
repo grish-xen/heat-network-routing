@@ -9,6 +9,7 @@ import type {
   JobStage,
   JobStatus,
   MapFeature,
+  MapBounds,
   MapObjectType,
   MapPage,
   Position,
@@ -302,4 +303,21 @@ export function parseMapPageText(text: string): MapPage {
     ),
     nextCursor: nextCursor === null ? null : expectString(nextCursor, '$.nextCursor'),
   }
+}
+
+export function parseMapBoundsText(text: string): MapBounds {
+  const object = expectObject(parseText(text), '$')
+  if (object.bbox === null) return null
+  const values = expectArray(object.bbox, '$.bbox')
+  if (values.length !== 4) throw new ResponseContractError('$.bbox: ожидаются четыре координаты')
+  const [minLon, minLat, maxLon, maxLat] = values.map((value, index) =>
+    expectFiniteNumber(value, `$.bbox[${index}]`),
+  )
+  if (
+    minLon === undefined || minLat === undefined || maxLon === undefined || maxLat === undefined ||
+    minLon < -180 || maxLon > 180 || minLat < -90 || maxLat > 90 || minLon > maxLon || minLat > maxLat
+  ) {
+    throw new ResponseContractError('$.bbox: некорректные границы WGS84')
+  }
+  return [minLon, minLat, maxLon, maxLat]
 }

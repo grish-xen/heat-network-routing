@@ -4,10 +4,12 @@ import {
   parseApiErrorText,
   parseHealthText,
   parseJobText,
+  parseMapBoundsText,
   parseMapPageText,
   parseVariantsText,
 } from './parse-response'
-import type { Health, Job, MapPage, MapQuery, VariantSummary } from '../model/api'
+import type { Health, Job, MapBounds, MapPage, MapQuery, VariantSummary } from '../model/api'
+import type { ObjectId } from '../model/object-id'
 import { formatObjectId } from '../model/object-id'
 
 type ResponseParser<T> = (text: string) => T
@@ -39,6 +41,15 @@ export class HttpHeatNetworkApi implements HeatNetworkApi {
       `/api/jobs/${encodeURIComponent(jobId)}/variants`,
       { signal },
       parseVariantsText,
+    )
+  }
+
+  getMapBounds(jobId: string, variantId: ObjectId, signal?: AbortSignal): Promise<MapBounds> {
+    const parameters = new URLSearchParams({ variantId: formatObjectId(variantId) })
+    return this.#request(
+      `/api/jobs/${encodeURIComponent(jobId)}/map/bounds?${parameters.toString()}`,
+      { signal },
+      parseMapBoundsText,
     )
   }
 

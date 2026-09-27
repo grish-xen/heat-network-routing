@@ -27,7 +27,7 @@ const variant = (rank: number): VariantSummary => ({
 
 function api(): HeatNetworkApi {
   return {
-    health: vi.fn(), createJob: vi.fn(), getJob: vi.fn(), getMapPage: vi.fn(),
+    health: vi.fn(), createJob: vi.fn(), getJob: vi.fn(), getMapBounds: vi.fn(), getMapPage: vi.fn(),
     listVariants: vi.fn().mockResolvedValue([variant(2), variant(1)]),
     getResultUrl: vi.fn().mockReturnValue('/api/jobs/job-1/result'),
   }

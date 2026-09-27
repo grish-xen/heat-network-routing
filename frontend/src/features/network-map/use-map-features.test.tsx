@@ -11,7 +11,7 @@ const feature = (id: string): MapPage['features'][number] => ({
 })
 
 function apiWith(getMapPage: HeatNetworkApi['getMapPage']): HeatNetworkApi {
-  return { health: vi.fn(), createJob: vi.fn(), getJob: vi.fn(), listVariants: vi.fn(), getMapPage, getResultUrl: vi.fn() }
+  return { health: vi.fn(), createJob: vi.fn(), getJob: vi.fn(), listVariants: vi.fn(), getMapBounds: vi.fn(), getMapPage, getResultUrl: vi.fn() }
 }
 
 describe('loadMapFeatures', () => {

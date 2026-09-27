@@ -11,6 +11,7 @@ function apiWithHealth(health: HeatNetworkApi['health']): HeatNetworkApi {
     createJob: vi.fn(),
     getJob: vi.fn(),
     listVariants: vi.fn(),
+    getMapBounds: vi.fn(),
     getMapPage: vi.fn(),
     getResultUrl: vi.fn(),
   }

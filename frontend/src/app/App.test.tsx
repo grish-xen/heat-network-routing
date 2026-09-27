@@ -17,7 +17,7 @@ function api(status: 'QUEUED' | 'FAILED' = 'QUEUED'): HeatNetworkApi {
   return {
     health: vi.fn().mockResolvedValue({ status: 'UP', contractVersion: '1.0', implementation: 'test' }),
     createJob: vi.fn().mockResolvedValue({ jobId: 'job-1', status, stage: status === 'FAILED' ? 'FAILED' : 'QUEUED', mode: '2d', diagnostics: [] }),
-    getJob: vi.fn(), listVariants: vi.fn(), getMapPage: vi.fn(), getResultUrl: vi.fn(),
+    getJob: vi.fn(), listVariants: vi.fn(), getMapBounds: vi.fn(), getMapPage: vi.fn(), getResultUrl: vi.fn(),
   }
 }
 

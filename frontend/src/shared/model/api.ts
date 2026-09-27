@@ -96,6 +96,8 @@ export interface MapPage {
   readonly nextCursor: string | null
 }
 
+export type MapBounds = readonly [number, number, number, number] | null
+
 export interface MapQuery {
   readonly layer: 'input' | 'result'
   readonly variantId?: ObjectId

@@ -3,9 +3,11 @@ import { render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
+import type { MapBounds } from '../../shared/model/api'
 
 const mapMock = vi.hoisted(() => ({
   adapter: {
+    fitBounds: vi.fn(),
     setFeatureCollection: vi.fn(),
     setLayerGroupVisibility: vi.fn(),
     destroy: vi.fn(),
@@ -17,9 +19,10 @@ vi.mock('./maplibre-adapter', () => ({ createMapLibreAdapter: mapMock.create }))
 
 import { NetworkMap } from './NetworkMap'
 
-function createApi(): HeatNetworkApi {
+function createApi(bounds: MapBounds = [37.4, 55.6, 37.5, 55.7]): HeatNetworkApi {
   return {
     health: vi.fn(), createJob: vi.fn(), getJob: vi.fn(), listVariants: vi.fn(), getResultUrl: vi.fn(),
+    getMapBounds: vi.fn().mockResolvedValue(bounds),
     getMapPage: vi.fn().mockResolvedValue({ type: 'FeatureCollection', features: [], nextCursor: null }),
   }
 }
@@ -32,6 +35,7 @@ function renderMap(element: React.ReactElement) {
 beforeEach(() => {
   mapMock.create.mockReset().mockReturnValue(mapMock.adapter)
   mapMock.adapter.setFeatureCollection.mockReset()
+  mapMock.adapter.fitBounds.mockReset()
   mapMock.adapter.setLayerGroupVisibility.mockReset()
   mapMock.adapter.destroy.mockReset()
 })
@@ -46,12 +50,17 @@ describe('NetworkMap', () => {
     ]
     const { rerender, unmount } = renderMap(<NetworkMap api={api} jobId="job-1" layers={layers} />)
 
-    await waitFor(() => expect(mapMock.adapter.setFeatureCollection).toHaveBeenCalled())
-    expect(api.getMapPage).toHaveBeenCalledWith(
+    await waitFor(() => expect(api.getMapBounds).toHaveBeenCalledWith(
       'job-1',
-      expect.objectContaining({ layer: 'input', variantId: undefined }),
+      { kind: 'string', value: 'variant-1' },
       expect.any(AbortSignal),
-    )
+    ))
+    await waitFor(() => expect(mapMock.adapter.fitBounds).toHaveBeenCalledWith([37.4, 55.6, 37.5, 55.7]))
+    await waitFor(() => expect(api.getMapPage).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ layer: 'input', variantId: undefined, bbox: [37.4, 55.6, 37.5, 55.7] }),
+      expect.any(AbortSignal),
+    ))
     expect(api.getMapPage).toHaveBeenCalledWith(
       'job-1',
       expect.objectContaining({ layer: 'result', variantId: { kind: 'string', value: 'variant-1' } }),
@@ -61,6 +70,35 @@ describe('NetworkMap', () => {
     expect(mapMock.create).toHaveBeenCalledTimes(1)
     unmount()
     expect(mapMock.adapter.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not fit or query geometry when the server reports no bounds', async () => {
+    const api = createApi(null)
+    renderMap(<NetworkMap api={api} jobId="job-1" layers={[
+      { layer: 'input' },
+      { layer: 'result', variantId: { kind: 'string', value: 'variant-1' } },
+    ]} />)
+
+    await waitFor(() => expect(api.getMapBounds).toHaveBeenCalledTimes(1))
+    expect(mapMock.adapter.fitBounds).not.toHaveBeenCalled()
+    expect(api.getMapPage).not.toHaveBeenCalled()
+  })
+
+  it('keeps the server bounds as the first geometry query until the map reports its fitted viewport', async () => {
+    const api = createApi([40, 50, 41, 51])
+    renderMap(<NetworkMap api={api} jobId="job-1" layers={[
+      { layer: 'input' },
+      { layer: 'result', variantId: { kind: 'string', value: 'variant-1' } },
+    ]} />)
+
+    await waitFor(() => expect(mapMock.adapter.fitBounds).toHaveBeenCalledWith([40, 50, 41, 51]))
+    await new Promise((resolve) => window.setTimeout(resolve, 10))
+    expect(api.getMapPage).toHaveBeenCalledTimes(2)
+    expect(api.getMapPage).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ bbox: [40, 50, 41, 51] }),
+      expect.any(AbortSignal),
+    )
   })
 
   it('debounces viewport changes reported by the adapter', () => {

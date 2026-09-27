@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseJobText, parseMapPageText, parseVariantsText, ResponseContractError } from './parse-response'
+import {
+  parseJobText,
+  parseMapBoundsText,
+  parseMapPageText,
+  parseVariantsText,
+  ResponseContractError,
+} from './parse-response'
 
 describe('lossless API parsing', () => {
   it('rejects missing required fields and invalid enums', () => {
@@ -33,5 +39,11 @@ describe('lossless API parsing', () => {
 
     expect(page.features[0]?.properties.id).toEqual({ kind: 'number', value: '9007199254740993' })
     expect(page.features[0]?.geometry.type).toBe('Point')
+  })
+
+  it('parses nullable WGS84 map bounds and rejects inverted bounds', () => {
+    expect(parseMapBoundsText('{"bbox":[37.4,55.6,37.5,55.7]}')).toEqual([37.4, 55.6, 37.5, 55.7])
+    expect(parseMapBoundsText('{"bbox":null}')).toBeNull()
+    expect(() => parseMapBoundsText('{"bbox":[37.5,55.6,37.4,55.7]}')).toThrow(ResponseContractError)
   })
 })

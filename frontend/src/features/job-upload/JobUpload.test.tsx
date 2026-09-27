@@ -19,6 +19,7 @@ function createApi(): HeatNetworkApi {
     }),
     getJob: vi.fn(),
     listVariants: vi.fn(),
+    getMapBounds: vi.fn(),
     getMapPage: vi.fn(),
     getResultUrl: vi.fn(),
   }

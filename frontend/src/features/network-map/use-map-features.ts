@@ -2,6 +2,8 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
 import type { MapPage, MapQuery } from '../../shared/model/api'
+import type { ObjectId } from '../../shared/model/object-id'
+import { objectIdKey } from '../../shared/model/object-id'
 import { mapQueryKey, serializeBbox } from './map-query'
 
 function abortIfNeeded(signal: AbortSignal): void {
@@ -45,16 +47,30 @@ export function useMapFeatures(api: HeatNetworkApi, jobId: string, query: MapQue
   })
 }
 
+export function useMapBounds(api: HeatNetworkApi, jobId: string, variantId: ObjectId | undefined) {
+  return useQuery({
+    queryKey: ['map-bounds', jobId, variantId ? objectIdKey(variantId) : null],
+    queryFn: ({ signal }) => {
+      if (!variantId) throw new Error('Для границ карты нужен вариант')
+      return api.getMapBounds(jobId, variantId, signal)
+    },
+    enabled: variantId !== undefined,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+}
+
 export function useMapFeatureCollections(
   api: HeatNetworkApi,
   jobId: string,
   queries: readonly MapQuery[],
+  enabled = true,
 ) {
   return useQueries({
     queries: queries.map((query) => ({
       queryKey: mapQueryKey(jobId, query),
       queryFn: ({ signal }: { signal: AbortSignal }) => loadMapFeatures(api, jobId, query, signal),
       placeholderData: (previous: MapPage | undefined) => previous,
+      enabled,
     })),
   })
 }
