@@ -434,6 +434,51 @@ class RoutingModuleTest {
 
 
     @Test
+    void plannerFindsRoutesWithMultipleObstaclesAndTargets() {
+        // Synthetic scene resembling competition data: multiple targets with different flows,
+        // existing network, and mixed restriction types (park, road, water).
+        List<InputObject> objects = new ArrayList<>();
+        // Existing line with chamber at root
+        objects.add(line("existing-main", 400,
+                new Coordinate(400000, 6170000), new Coordinate(399000, 6170000)));
+        objects.add(chamber("existing-chamber", new Coordinate(400000, 6170000)));
+
+        // 5 targets at different distances and flows (simulating 17 competition points at smaller scale)
+        objects.add(connectionPoint(1, 24.87, new Coordinate(400200, 6170100)));
+        objects.add(connectionPoint(2, 18.76, new Coordinate(400150, 6169900)));
+        objects.add(connectionPoint(3, 29.42, new Coordinate(399800, 6170200)));
+        objects.add(connectionPoint(4, 47.7, new Coordinate(399500, 6169800)));
+        objects.add(connectionPoint(5, 15.99, new Coordinate(399300, 6170050)));
+
+        // Park (forbidden) blocking some direct paths
+        objects.add(restriction("P1", "park", square(399600, 6169900, 400100, 6170100)));
+
+        // Road (special crossing) - must be crossed with special pass
+        objects.add(restriction("R1", "road", square(399200, 6169950, 399400, 6170050)));
+
+        // Water (forbidden) - must be avoided
+        objects.add(restriction("W1", "water", square(399700, 6170150, 400000, 6170250)));
+
+        GridRoutePlanner planner = new GridRoutePlanner(new InMemoryDataset(objects), twoD(20), null);
+        List<Model.RouteCandidate> candidates = drain(planner);
+
+        assertFalse(candidates.isEmpty(), "at least one candidate expected");
+        Model.RouteCandidate best = candidates.get(candidates.size() - 1);
+
+        // With 5 targets, we expect at least some to be connected
+        int connected = 0;
+        for (int i = 1; i <= 5; i++) {
+            if (!best.unconnectedPointIds.contains(numId(i))) {
+                connected++;
+            }
+        }
+        // The planner should connect at least some targets; exact count depends on budget
+        assertTrue(connected >= 2, "expected at least 2 connected, got " + connected);
+        planner.close();
+    }
+
+
+    @Test
     void plannerUsesTypedDatasetStreamsOnly() {
         List<InputObject> objects = new ArrayList<>();
         objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(600, 0)));
