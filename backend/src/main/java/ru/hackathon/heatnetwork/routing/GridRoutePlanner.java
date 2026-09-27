@@ -41,18 +41,22 @@ import ru.hackathon.heatnetwork.model.ObjectId;
  *
  * <p>Tie points: an existing chamber within reach (the 10 m rule is applied to the
  * chosen point on an existing line), otherwise a snapped point on an existing
- * heat_network line where a new chamber will be created. Each trace becomes one
- * tree: root node (chamber) plus the target node, the polyline is the edge geometry
- * with turn vertices inside the LineString. A component per trace keeps the tree
- * property strict; the empty candidate (all targets unconnected) is emitted once so
- * the coordinator can still evaluate the penalty variant.</p>
+ * heat_network line where a new chamber will be created. When direct tie options
+ * fail, the planner taps into already accepted traces: a vertex of a parent polyline
+ * becomes a new chamber (the parent edge is split there, keeping each branch node at
+ * two split adjacencies plus up to two taps within the four-adjacency limit), and the
+ * new edge runs from that chamber to the target. Traces accumulate into one tree per
+ * root; the empty candidate (all targets unconnected) is emitted once so the
+ * coordinator can still evaluate the penalty variant.</p>
  */
 public final class GridRoutePlanner {
 
-    /** Attempts per target before it is treated as unreachable by this planner. */
-    static final int MAX_TRACES_PER_TARGET = 6;
-    private static final int MAX_EXPANSIONS = 300_000;
+    /** Safety cap on attempts per target; real exhaustion is tracked by the stage machine. */
+    static final int MAX_TRACES_PER_TARGET = 100;
+    private static final int BASE_MAX_EXPANSIONS = 1_000_000;
     private static final double COINCIDENT_M = 0.001;
+    /** Max taps on one branch vertex: 2 (split adjacencies) + 2 taps = 4 total. */
+    private static final int MAX_TAPS_PER_VERTEX = 2;
 
     private final GeometryFactory gf = new GeometryFactory();
     private final Dataset dataset;
@@ -61,13 +65,17 @@ public final class GridRoutePlanner {
     private final Mode mode;
     private final int maxCandidates;
     private final List<ObjectId> orderedTargets;
+    private final Map<ObjectId, Integer> targetOrderIndex = new HashMap<>();
 
     private final Map<ObjectId, Boolean> connected = new LinkedHashMap<>();
+    /** Accepted traces in acceptance order; parents always precede their tappers. */
     private final Map<ObjectId, Trace> acceptedTraces = new LinkedHashMap<>();
     private final Map<ObjectId, Integer> attemptCounters = new HashMap<>();
     private final Map<String, Integer> newEdgesPerRoot = new HashMap<>();
     private final Set<ObjectId> exhausted = new HashSet<>();
     private final Map<ObjectId, Integer> targetDiameter = new HashMap<>();
+    /** Tap registry: parent target id -> (vertex index -> number of taps). */
+    private final Map<ObjectId, Map<Integer, Integer>> tapsByParent = new HashMap<>();
 
     private int candidateCounter = 0;
     private int targetCursor = 0;
@@ -78,15 +86,25 @@ public final class GridRoutePlanner {
 
     private static final class Trace {
         final ObjectId targetId;
+        /** Root tie option; null for a tapped trace (branching off an accepted trace). */
         final TieOption tie;
+        /** Root→target (direct) or tap point→target (tapped) polyline. */
         final List<Coordinate> points;
+        /** Root key of the tree this trace belongs to. */
         final String rootId;
+        /** Parent trace target when tapped; null for a direct trace. */
+        final ObjectId tapParentTargetId;
+        /** Vertex index on the parent polyline; -1 for a direct trace. */
+        final int tapVertexIndex;
 
-        Trace(ObjectId targetId, TieOption tie, List<Coordinate> points, String rootId) {
+        Trace(ObjectId targetId, TieOption tie, List<Coordinate> points, String rootId,
+              ObjectId tapParentTargetId, int tapVertexIndex) {
             this.targetId = targetId;
             this.tie = tie;
             this.points = points;
             this.rootId = rootId;
+            this.tapParentTargetId = tapParentTargetId;
+            this.tapVertexIndex = tapVertexIndex;
         }
     }
 
@@ -97,14 +115,50 @@ public final class GridRoutePlanner {
         final ObjectId existingObjectId;
         final Coordinate coordinate;
         final double penaltyM;
+        /** Heat network line ID this chamber sits on (for EXISTING_CHAMBER), to exempt its clearance. */
+        final ObjectId exemptLineId;
 
-        TieOption(TieKind kind, ObjectId existingObjectId, Coordinate coordinate, double penaltyM) {
+        TieOption(TieKind kind, ObjectId existingObjectId, Coordinate coordinate, double penaltyM, ObjectId exemptLineId) {
             this.kind = kind;
             this.existingObjectId = existingObjectId;
             this.coordinate = coordinate;
             this.penaltyM = penaltyM;
+            this.exemptLineId = exemptLineId;
         }
     }
+
+    /** A candidate branch point on an already accepted trace. */
+    private static final class TapCandidate {
+        final Coordinate point;
+        final ObjectId parentTargetId;
+        final int vertexIndex;
+        final String rootId;
+        final String key;
+
+        TapCandidate(Coordinate point, ObjectId parentTargetId, int vertexIndex, String rootId, String key) {
+            this.point = point;
+            this.parentTargetId = parentTargetId;
+            this.vertexIndex = vertexIndex;
+            this.rootId = rootId;
+            this.key = key;
+        }
+    }
+
+    /**
+     * Per-target attempt machine. Stages: 0 = ties at 25 m (snap radius 400 m),
+     * 1 = taps on accepted traces, 2 = ties at 25 m (radii 1000/2500/∞),
+     * 3 = ties at 40 m (all radii), 4 = ties at 60 m (all radii).
+     */
+    private static final class TargetAttemptState {
+        int stage = 0;
+        int optionIndex = 0;
+        int tieIndex = 0;
+        List<TieOption> currentOptions = null;
+        final Set<String> triedTaps = new HashSet<>();
+        boolean exhaustedAll = false;
+    }
+
+    private final Map<ObjectId, TargetAttemptState> attemptStates = new HashMap<>();
 
     public GridRoutePlanner(Dataset dataset, SearchOptions options, RulesCatalog catalog) {
         this.dataset = dataset;
@@ -137,8 +191,9 @@ public final class GridRoutePlanner {
             return Double.compare(tb.flowTph, ta.flowTph);
         });
         this.orderedTargets = ids;
-        for (ObjectId id : ids) {
-            connected.put(id, Boolean.FALSE);
+        for (int i = 0; i < ids.size(); i++) {
+            targetOrderIndex.put(ids.get(i), i);
+            connected.put(ids.get(i), Boolean.FALSE);
         }
     }
 
@@ -190,7 +245,8 @@ public final class GridRoutePlanner {
             int attempt = attemptCounters.merge(targetId, 1, Integer::sum);
             Trace trace = traceToTarget(target, attempt);
             if (trace == null) {
-                if (attempt >= MAX_TRACES_PER_TARGET) {
+                TargetAttemptState state = attemptStates.get(targetId);
+                if (attempt >= MAX_TRACES_PER_TARGET || (state != null && state.exhaustedAll)) {
                     exhausted.add(targetId);
                 }
                 continue;
@@ -214,21 +270,61 @@ public final class GridRoutePlanner {
         if (evaluation == null || evaluation.accepted()) {
             return;
         }
-        // A rejected candidate drops its newest trace; the affected target reroutes
-        // with the next attempt (different tie option and grid step).
-        // A rejected evaluation always corresponds to the candidate returned by the
+        // A rejected candidate drops its newest trace. Traces that tapped the removed
+        // one cascade: their geometry is no longer connected to a root.
+        // The rejected evaluation always corresponds to the candidate returned by the
         // immediately preceding next() call. Do not infer this from map iteration order:
         // target order is flow-sorted, while the latest trace may be any target after retries.
         ObjectId newestTarget = lastEmittedTarget;
-        if (newestTarget != null) {
-            Trace removed = acceptedTraces.remove(newestTarget);
-            connected.put(newestTarget, Boolean.FALSE);
-            if (removed != null) {
-                String rootKey = rootKey(removed.tie);
-                newEdgesPerRoot.merge(rootKey, -1, Integer::sum);
-            }
-            exhausted.remove(newestTarget);
+        if (newestTarget == null) {
+            return;
         }
+        Set<ObjectId> removed = new HashSet<>();
+        removeTrace(newestTarget, newestTarget, removed);
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (ObjectId tid : new ArrayList<>(acceptedTraces.keySet())) {
+                Trace s = acceptedTraces.get(tid);
+                if (s != null && s.tapParentTargetId != null && removed.contains(s.tapParentTargetId)) {
+                    removeTrace(tid, newestTarget, removed);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    /** Removes one accepted trace with all bookkeeping; cascading is done by the caller. */
+    private void removeTrace(ObjectId targetId, ObjectId newestTarget, Set<ObjectId> removed) {
+        Trace removedTrace = acceptedTraces.remove(targetId);
+        if (removedTrace == null) {
+            return;
+        }
+        removed.add(targetId);
+        connected.put(targetId, Boolean.FALSE);
+        if (removedTrace.tie != null) {
+            newEdgesPerRoot.merge(removedTrace.rootId, -1, Integer::sum);
+        }
+        if (removedTrace.tapParentTargetId != null) {
+            Map<Integer, Integer> used = tapsByParent.get(removedTrace.tapParentTargetId);
+            if (used != null) {
+                used.merge(removedTrace.tapVertexIndex, -1, Integer::sum);
+                if (used.getOrDefault(removedTrace.tapVertexIndex, 0) <= 0) {
+                    used.remove(removedTrace.tapVertexIndex);
+                }
+                if (used.isEmpty()) {
+                    tapsByParent.remove(removedTrace.tapParentTargetId);
+                }
+            }
+        }
+        tapsByParent.remove(targetId);
+        exhausted.remove(targetId);
+        if (!targetId.equals(newestTarget)) {
+            // The cascade victim is not at fault: restart its search from scratch.
+            attemptStates.remove(targetId);
+        }
+        // The newest target keeps its advanced attempt state: the rejected geometry
+        // must not be retried, but the remaining combinations stay valid.
     }
 
     private ObjectId nextTraceTarget() {
@@ -238,28 +334,118 @@ public final class GridRoutePlanner {
             }
             ObjectId id = orderedTargets.get(targetCursor);
             targetCursor++;
-            if (!connected.get(id) && !exhausted.contains(id)) {
+            Boolean conn = connected.get(id);
+            boolean isConnected = conn != null && conn;
+            if (!isConnected && !exhausted.contains(id)) {
                 return id;
             }
         }
         return null;
     }
 
+    private static double stepForStage(int stage) {
+        switch (stage) {
+            case 3: return 40.0;
+            case 4: return 60.0;
+            default: return 25.0;
+        }
+    }
+
     private Trace traceToTarget(RoutingContext.Target target, int attempt) {
-        int optionIndex = (attempt - 1) / 3;
-        int stepVariant = (attempt - 1) % 3;
-        List<TieOption> options = tieOptions(target, optionIndex);
-        if (options.isEmpty()) {
+        TargetAttemptState state = attemptStates.computeIfAbsent(target.id, k -> new TargetAttemptState());
+        Coordinate goal = target.point.getCoordinate();
+        int diameter = targetDiameter.get(target.id);
+        while (!state.exhaustedAll) {
+            if (state.stage == 1) {
+                TapCandidate tap = nextTap(target, state);
+                if (tap == null) {
+                    state.stage = 2;
+                    state.optionIndex = 1;
+                    state.tieIndex = 0;
+                    state.currentOptions = null;
+                    continue;
+                }
+                List<Coordinate> path = aStar(tap.point, goal, target.ownOksPolygonId, diameter,
+                        25.0, null, tap.parentTargetId, tap.point);
+                if (path == null) {
+                    continue;
+                }
+                path = straightenOwnOksApproach(path, target);
+                if (!validOwnOksApproach(path, target)) {
+                    continue;
+                }
+                return new Trace(target.id, null, path, tap.rootId, tap.parentTargetId, tap.vertexIndex);
+            }
+            double step = stepForStage(state.stage);
+            if (state.currentOptions == null) {
+                state.currentOptions = tieOptions(target, state.optionIndex);
+            }
+            if (state.tieIndex >= state.currentOptions.size()) {
+                int maxOptionIndex = state.stage == 0 ? 0 : 3;
+                state.optionIndex++;
+                state.tieIndex = 0;
+                state.currentOptions = null;
+                if (state.optionIndex > maxOptionIndex) {
+                    state.stage++;
+                    if (state.stage > 4) {
+                        state.exhaustedAll = true;
+                        break;
+                    }
+                    state.optionIndex = state.stage == 2 ? 1 : 0;
+                    state.tieIndex = 0;
+                }
+                continue;
+            }
+            TieOption tie = state.currentOptions.get(state.tieIndex);
+            state.tieIndex++;
+            List<Coordinate> path = aStar(tie.coordinate, goal, target.ownOksPolygonId, diameter,
+                    step, tie.exemptLineId, null, null);
+            if (path == null) {
+                // Inline advance: same-target retry loop instead of returning to next().
+                continue;
+            }
+            path = straightenOwnOksApproach(path, target);
+            if (!validOwnOksApproach(path, target)) {
+                continue;
+            }
+            return new Trace(target.id, tie, path, rootKey(tie), null, -1);
+        }
+        return null;
+    }
+
+    /** Nearest untried tap point on any accepted trace; marks it tried. */
+    private TapCandidate nextTap(RoutingContext.Target target, TargetAttemptState state) {
+        List<TapCandidate> taps = new ArrayList<>();
+        Coordinate goal = target.point.getCoordinate();
+        for (Trace parentTrace : acceptedTraces.values()) {
+            if (parentTrace.targetId.equals(target.id)) {
+                continue;
+            }
+            Map<Integer, Integer> used = tapsByParent.get(parentTrace.targetId);
+            List<Coordinate> pts = parentTrace.points;
+            for (int i = 1; i + 1 < pts.size(); i++) {
+                // Exclude the parent root (index 0) and the parent target leaf (last).
+                if (used != null && used.getOrDefault(i, 0) >= MAX_TAPS_PER_VERTEX) {
+                    continue;
+                }
+                String key = targetOrderIndex.get(parentTrace.targetId) + ":" + i;
+                if (state.triedTaps.contains(key)) {
+                    continue;
+                }
+                Coordinate v = pts.get(i);
+                if (insideForbiddenZone(v, target.ownOksPolygonId)) {
+                    continue;
+                }
+                taps.add(new TapCandidate(v, parentTrace.targetId, i, parentTrace.rootId, key));
+            }
+        }
+        if (taps.isEmpty()) {
             return null;
         }
-        TieOption tie = options.get(Math.min(optionIndex, options.size() - 1));
-        List<Coordinate> path = aStar(tie.coordinate, target.point.getCoordinate(),
-                target.ownOksPolygonId, targetDiameter.get(target.id), stepVariant);
-        if (path == null || !validOwnOksApproach(path, target)) {
-            return null;
-        }
-        String rootId = rootId(tie, target);
-        return new Trace(target.id, tie, path, rootId);
+        taps.sort(Comparator.comparingDouble(t -> t.point.distance(goal)));
+        TapCandidate best = taps.get(0);
+        state.triedTaps.add(best.key);
+        return best;
     }
 
     private boolean validOwnOksApproach(List<Coordinate> path, RoutingContext.Target target) {
@@ -281,26 +467,50 @@ public final class GridRoutePlanner {
         }
         // The first point inside the own polygon must be followed only by a
         // straight segment to the target; no turn or re-entry is permitted.
+        // Use a tolerance proportional to grid step (approx 1% of 25m = 0.25m)
+        // to account for grid quantization.
         Coordinate entry = path.get(firstInside);
         Coordinate targetPoint = target.point.getCoordinate();
+        double tolerance = 0.5; // meters, allows small grid quantization deviation
         for (int i = firstInside; i < path.size() - 1; i++) {
             Coordinate a = path.get(i);
             Coordinate b = path.get(i + 1);
             double cross = (targetPoint.x - entry.x) * (b.y - a.y)
                     - (targetPoint.y - entry.y) * (b.x - a.x);
-            if (Math.abs(cross) > 0.001) {
+            if (Math.abs(cross) > tolerance) {
                 return false;
             }
         }
         return path.get(path.size() - 1).distance(targetPoint) <= 0.001;
     }
+
+    /** Replaces the portion of the path inside own OKS polygon with a straight segment. */
+    private List<Coordinate> straightenOwnOksApproach(List<Coordinate> path, RoutingContext.Target target) {
+        if (target.ownOksPolygon == null || path.size() < 2) {
+            return path;
+        }
+        int firstInside = -1;
+        for (int i = 0; i < path.size(); i++) {
+            if (target.ownOksPolygon.covers(gf.createPoint(path.get(i)))) {
+                firstInside = i;
+                break;
+            }
+        }
+        if (firstInside <= 0 || firstInside >= path.size() - 1) {
+            return path;
+        }
+        // Replace everything from entry point to target with a straight segment
+        List<Coordinate> result = new ArrayList<>(firstInside + 2);
+        for (int i = 0; i <= firstInside; i++) {
+            result.add(path.get(i));
+        }
+        result.add(target.point.getCoordinate());
+        return result;
+    }
+
     private String rootKey(TieOption tie) {
         return tie.kind.name() + ":" + tie.existingObjectId + ":"
                 + Math.round(tie.coordinate.x * 1000.0) + ":" + Math.round(tie.coordinate.y * 1000.0);
-    }
-
-    private String rootId(TieOption tie, RoutingContext.Target target) {
-        return rootKey(tie);
     }
 
     private int newEdgeBudget(TieOption tie) {
@@ -362,7 +572,8 @@ public final class GridRoutePlanner {
 
         for (RoutingContext.Chamber chamber : context.existingChambers()) {
             Coordinate cc = chamber.point.getCoordinate();
-            TieOption option = new TieOption(TieKind.EXISTING_CHAMBER, chamber.id, cc, cc.distance(goal));
+            ObjectId exemptLineId = findHeatNetworkLineForChamber(cc);
+            TieOption option = new TieOption(TieKind.EXISTING_CHAMBER, chamber.id, cc, cc.distance(goal), exemptLineId);
             if (newEdgeBudget(option) >= 1) {
                 result.add(option);
             }
@@ -371,12 +582,13 @@ public final class GridRoutePlanner {
         for (RoutingContext.LineSnap snap : context.snapsOnLines(goal, radius)) {
             if (!insideForbiddenZone(snap.snap, target.ownOksPolygonId)) {
                 TieOption option = new TieOption(TieKind.NEW_CHAMBER_ON_LINE, snap.lineId, snap.snap,
-                        snap.distanceM * 2.0);
+                        snap.distanceM * 2.0, snap.lineId);
                 // The 10 m rule: a suitable existing chamber wins over the raw snap.
                 RoutingContext.Chamber near = nearestUsableChamber(snap.snap);
                 if (near != null) {
+                    ObjectId nearExemptLineId = findHeatNetworkLineForChamber(near.point.getCoordinate());
                     TieOption chamberOption = new TieOption(TieKind.EXISTING_CHAMBER, near.id,
-                            near.point.getCoordinate(), option.penaltyM);
+                            near.point.getCoordinate(), option.penaltyM, nearExemptLineId);
                     if (newEdgeBudget(chamberOption) >= 1 && !containsOption(result, chamberOption)) {
                         result.add(chamberOption);
                     }
@@ -392,6 +604,17 @@ public final class GridRoutePlanner {
             unique.putIfAbsent(rootKey(option), option);
         }
         return new ArrayList<>(unique.values());
+    }
+
+    /** Finds the heat_network line that a chamber coordinate lies on (within 1m). */
+    private ObjectId findHeatNetworkLineForChamber(Coordinate chamberCoord) {
+        Point chamberPoint = gf.createPoint(chamberCoord);
+        for (RoutingContext.HeatLine line : context.existingLines()) {
+            if (line.line.distance(chamberPoint) <= 1.0) {
+                return line.id;
+            }
+        }
+        return null;
     }
 
     private boolean containsOption(List<TieOption> options, TieOption probe) {
@@ -410,7 +633,7 @@ public final class GridRoutePlanner {
         for (RoutingContext.Chamber chamber : context.chambersNear(snap, catalog.existingChamberRadiusM())) {
             double d = chamber.point.getCoordinate().distance(snap);
             if (d < bestDistance) {
-                TieOption probe = new TieOption(TieKind.EXISTING_CHAMBER, chamber.id, chamber.point.getCoordinate(), 0);
+                TieOption probe = new TieOption(TieKind.EXISTING_CHAMBER, chamber.id, chamber.point.getCoordinate(), 0, findHeatNetworkLineForChamber(chamber.point.getCoordinate()));
                 if (newEdgeBudget(probe) >= 1) {
                     best = chamber;
                     bestDistance = d;
@@ -444,19 +667,16 @@ public final class GridRoutePlanner {
         return false;
     }
 
-    private double gridStep(int stepVariant) {
-        switch (stepVariant) {
-            case 0: return 25.0;
-            case 1: return 40.0;
-            default: return 60.0;
-        }
-    }
-
-    /** A* over the grid; returns coordinates from the tie point to the goal, endpoints included. */
+    /** A* over the grid; returns coordinates from the start point to the goal, endpoints included. */
     private List<Coordinate> aStar(Coordinate start, Coordinate goal, ObjectId exemptOksPolygonId,
-                                   int diameterMm, int stepVariant) {
-        double step = gridStep(stepVariant);
-        Envelope bounds = context.searchBounds(step * 4);
+                                   int diameterMm, double step, ObjectId exemptLineId,
+                                   ObjectId parentTargetId, Coordinate tapPoint) {
+        // Search bounds: envelope of start/goal/chambers/lines, padded to allow routing around
+        // large restrictions (rivers, parks). Use 3x straight-line distance (capped) instead of 10x
+        // to avoid excessively large search areas that cause timeouts.
+        double straightDist = start.distance(goal);
+        double padM = Math.max(500.0, Math.min(5000.0, straightDist * 3.0));
+        Envelope bounds = context.searchBounds(padM);
         Map<String, Double> gScore = new HashMap<>();
         Map<String, String> cameFrom = new HashMap<>();
         Map<String, Coordinate> coords = new HashMap<>();
@@ -472,6 +692,11 @@ public final class GridRoutePlanner {
         open.add(startKey);
 
         int expansions = 0;
+        // Scale expansion limit by inverse step: finer grid has more nodes per meter.
+        // Also scale by straight-line distance (capped) so distant targets get more budget
+        // but not excessively more. Base 500k at 25m step for 1km distance.
+        double distanceFactor = Math.max(0.5, Math.min(5.0, straightDist / 1000.0));
+        int maxExpansions = (int) (BASE_MAX_EXPANSIONS * (25.0 / step) * distanceFactor);
         String currentKey = startKey;
         while (!open.isEmpty()) {
             currentKey = open.poll();
@@ -482,14 +707,15 @@ public final class GridRoutePlanner {
             if (current.distance(goal) <= step * 1.5) {
                 return simplify(reconstruct(cameFrom, currentKey, coords, goal));
             }
-            if (++expansions > MAX_EXPANSIONS) {
+            if (++expansions > maxExpansions) {
                 return null;
             }
 
             Coordinate previous = cameFrom.containsKey(currentKey)
                     ? coords.get(cameFrom.get(currentKey)) : null;
             for (Coordinate neighbor : neighbors(current, step, bounds)) {
-                if (!moveAllowed(current, neighbor, previous, exemptOksPolygonId, diameterMm)) {
+                if (!moveAllowed(current, neighbor, previous, exemptOksPolygonId, diameterMm, exemptLineId,
+                        parentTargetId, tapPoint)) {
                     continue;
                 }
                 String neighborKey = key(neighbor, step);
@@ -524,7 +750,8 @@ public final class GridRoutePlanner {
     }
 
     private boolean moveAllowed(Coordinate from, Coordinate to, Coordinate previous,
-                                ObjectId exemptOksPolygonId, int diameterMm) {
+                                ObjectId exemptOksPolygonId, int diameterMm, ObjectId exemptLineId,
+                                ObjectId parentTargetId, Coordinate tapPoint) {
         // Turn limit: the change of direction must not exceed 90° (dot product >= 0).
         if (previous != null) {
             double d1x = from.x - previous.x, d1y = from.y - previous.y;
@@ -533,17 +760,36 @@ public final class GridRoutePlanner {
                 return false;
             }
         }
-        if (context.blockedByForbidden(from, to, exemptOksPolygonId)) {
+        // If moving from an existing chamber, also exempt all heat_network lines that touch that chamber.
+        Set<ObjectId> exemptLines = new HashSet<>();
+        if (exemptLineId != null) {
+            exemptLines.add(exemptLineId);
+        }
+        for (RoutingContext.Chamber chamber : context.existingChambers()) {
+            if (chamber.point.getCoordinate().equals2D(from)) {
+                for (RoutingContext.HeatLine line : context.existingLines()) {
+                    if (line.line.distance(chamber.point) <= 1.0) {
+                        exemptLines.add(line.id);
+                    }
+                }
+                break;
+            }
+        }
+        if (context.blockedByForbidden(from, to, exemptOksPolygonId, exemptLines)) {
             return false;
         }
-        if (context.violatesSpecialClearance(from, to, diameterMm, exemptOksPolygonId)) {
+        if (context.violatesSpecialClearance(from, to, diameterMm, exemptOksPolygonId, exemptLines)) {
             return false;
         }
-        return !crossesAcceptedTraces(from, to);
+        return !crossesAcceptedTraces(from, to, parentTargetId, tapPoint);
     }
 
-    /** New traces must not cross already accepted polylines except at a shared root point. */
-    private boolean crossesAcceptedTraces(Coordinate from, Coordinate to) {
+    /**
+     * New traces must not cross already accepted polylines except at a shared root
+     * point — or, for a tap search, at the tap point on the parent trace.
+     */
+    private boolean crossesAcceptedTraces(Coordinate from, Coordinate to,
+                                          ObjectId parentTargetId, Coordinate tapPoint) {
         if (acceptedTraces.isEmpty()) {
             return false;
         }
@@ -553,16 +799,32 @@ public final class GridRoutePlanner {
             if (!segment.intersects(polyline)) {
                 continue;
             }
-            if (from.distance(trace.tie.coordinate) <= COINCIDENT_M) {
+            if (parentTargetId != null && trace.targetId.equals(parentTargetId)) {
+                // Touching the parent polyline is allowed only at the tap point itself.
                 Geometry intersection = segment.intersection(polyline);
-                boolean onlyAtRoot = true;
+                boolean onlyAtTap = true;
                 for (Coordinate c : intersection.getCoordinates()) {
-                    if (c.distance(trace.tie.coordinate) > COINCIDENT_M) {
-                        onlyAtRoot = false;
+                    if (c.distance(tapPoint) > COINCIDENT_M) {
+                        onlyAtTap = false;
                         break;
                     }
                 }
-                if (onlyAtRoot) {
+                if (onlyAtTap) {
+                    continue;
+                }
+                return true;
+            }
+            Coordinate anchor = trace.tie != null ? trace.tie.coordinate : trace.points.get(0);
+            if (from.distance(anchor) <= COINCIDENT_M) {
+                Geometry intersection = segment.intersection(polyline);
+                boolean onlyAtAnchor = true;
+                for (Coordinate c : intersection.getCoordinates()) {
+                    if (c.distance(anchor) > COINCIDENT_M) {
+                        onlyAtAnchor = false;
+                        break;
+                    }
+                }
+                if (onlyAtAnchor) {
                     continue;
                 }
             }
@@ -581,7 +843,7 @@ public final class GridRoutePlanner {
         }
         Collections.reverse(path);
         if (path.size() == 1) {
-            // The tie point itself is within reach of the goal: keep it as the start.
+            // The start point itself is within reach of the goal: keep it as the start.
             path.add(goal);
         } else {
             path.set(path.size() - 1, goal);
@@ -613,30 +875,89 @@ public final class GridRoutePlanner {
     private void accept(Trace trace) {
         acceptedTraces.put(trace.targetId, trace);
         connected.put(trace.targetId, Boolean.TRUE);
-        newEdgesPerRoot.merge(rootKey(trace.tie), 1, Integer::sum);
+        // Only direct traces occupy a root adjacency; a tap edge hangs off a branch
+        // chamber created by splitting the parent polyline, not off the root.
+        if (trace.tie != null) {
+            newEdgesPerRoot.merge(trace.rootId, 1, Integer::sum);
+        }
+        if (trace.tapParentTargetId != null) {
+            tapsByParent.computeIfAbsent(trace.tapParentTargetId, k -> new LinkedHashMap<>())
+                    .merge(trace.tapVertexIndex, 1, Integer::sum);
+        }
     }
 
     private RouteCandidate assembleCandidate() {
         RouteCandidate candidate = new RouteCandidate();
         candidate.candidateId = "grid-" + candidateCounter;
         Map<String, Node> nodesById = new LinkedHashMap<>();
-
-        for (ObjectId targetId : orderedTargets) {
-            Trace trace = acceptedTraces.get(targetId);
-            if (trace == null) {
-                candidate.unconnectedPointIds.add(targetId);
-                continue;
+        int[] edgeCounter = {0};
+        // Acceptance order guarantees a parent trace is assembled before its tappers.
+        for (Trace trace : acceptedTraces.values()) {
+            RoutingContext.Target t = target(trace.targetId);
+            List<Coordinate> pts = trace.points;
+            Node fromNode;
+            if (trace.tie == null) {
+                String branchId = branchNodeId(trace.tapParentTargetId, trace.tapVertexIndex);
+                fromNode = nodesById.get(branchId);
+                if (fromNode == null) {
+                    fromNode = branchNode(nodesById, candidate, branchId, pts.get(0));
+                }
+            } else {
+                fromNode = node(nodesById, candidate, trace.tie);
             }
-            Node root = node(nodesById, candidate, trace.tie);
-            Node goal = targetNode(nodesById, candidate, target(targetId));
-            Edge edge = new Edge();
-            edge.id = "e:" + candidate.candidateId + ":t" + targetId;
-            edge.fromNodeId = root.id;
-            edge.toNodeId = goal.id;
-            edge.geometry = gf.createLineString(trace.points.toArray(new Coordinate[0]));
-            candidate.edges.add(edge);
+            // Split the polyline at registered tap vertices; each branch point becomes
+            // a new chamber between the prefix and suffix edges.
+            Map<Integer, Integer> taps = tapsByParent.get(trace.targetId);
+            int prev = 0;
+            if (taps != null && !taps.isEmpty()) {
+                List<Integer> indices = new ArrayList<>(taps.keySet());
+                Collections.sort(indices);
+                for (int vIdx : indices) {
+                    if (vIdx <= prev || vIdx >= pts.size() - 1) {
+                        continue;
+                    }
+                    String bid = branchNodeId(trace.targetId, vIdx);
+                    Node bn = nodesById.get(bid);
+                    if (bn == null) {
+                        bn = branchNode(nodesById, candidate, bid, pts.get(vIdx));
+                    }
+                    emitEdge(candidate, edgeCounter[0]++, fromNode, bn, pts.subList(prev, vIdx + 1));
+                    fromNode = bn;
+                    prev = vIdx;
+                }
+            }
+            Node goalNode = targetNode(nodesById, candidate, t);
+            emitEdge(candidate, edgeCounter[0]++, fromNode, goalNode, pts.subList(prev, pts.size()));
+        }
+        for (ObjectId id : orderedTargets) {
+            if (!acceptedTraces.containsKey(id)) {
+                candidate.unconnectedPointIds.add(id);
+            }
         }
         return candidate;
+    }
+
+    private void emitEdge(RouteCandidate candidate, int seq, Node from, Node to, List<Coordinate> coords) {
+        Edge edge = new Edge();
+        edge.id = "e:" + candidate.candidateId + ":" + seq;
+        edge.fromNodeId = from.id;
+        edge.toNodeId = to.id;
+        edge.geometry = gf.createLineString(coords.toArray(new Coordinate[0]));
+        candidate.edges.add(edge);
+    }
+
+    private String branchNodeId(ObjectId parentTargetId, int vertexIndex) {
+        return "b:" + targetOrderIndex.get(parentTargetId) + ":" + vertexIndex;
+    }
+
+    private Node branchNode(Map<String, Node> nodesById, RouteCandidate candidate, String id, Coordinate at) {
+        Node node = new Node();
+        node.id = id;
+        node.kind = NodeKind.NEW_CHAMBER;
+        node.geometry = gf.createPoint(at);
+        nodesById.put(id, node);
+        candidate.nodes.add(node);
+        return node;
     }
 
     private Node node(Map<String, Node> nodesById, RouteCandidate candidate, TieOption tie) {
