@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockMultipartFile;
 import ru.hackathon.heatnetwork.input.GeoJsonInputParser;
 import ru.hackathon.heatnetwork.input.InputParser;
@@ -37,6 +39,58 @@ import static org.mockito.Mockito.*;
 class JobServiceTest {
     @TempDir Path temporary;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+
+    @ParameterizedTest @ValueSource(booleans = {true, false})
+    void terminalWriteFailureRetainsCapacityAndRetriesTheOriginalOutcome(boolean successfulCalculation) throws Exception {
+        ObjectMapper configured = spy(mapper.copy());
+        ObjectMapper diskMapper = spy(mapper.copy());
+        doReturn(diskMapper).when(configured).copy();
+        java.util.concurrent.atomic.AtomicBoolean blocked = new java.util.concurrent.atomic.AtomicBoolean(true);
+        CountDownLatch failedWrite = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            Object value = invocation.getArgument(1);
+            if (value instanceof FileJobStore.StoredJob
+                    && ((FileJobStore.StoredJob) value).job.terminal() && blocked.get()) {
+                failedWrite.countDown();
+                throw new IOException("Simulated terminal status disk failure");
+            }
+            return invocation.callRealMethod();
+        }).when(diskMapper).writeValue(any(java.io.File.class), any(Object.class));
+        JobProperties settings = properties();
+        settings.setWorkers(1);
+        settings.setQueueCapacity(0);
+        RulesCatalog rules = RulesCatalog.loadDefault();
+        InputParser parser = successfulCalculation ? new GeoJsonInputParser(temporary.resolve("datasets"))
+                : path -> { throw new InvalidInputException(List.of(diagnostic(new ObjectId(com.fasterxml.jackson.databind.node.TextNode.valueOf("bad-input"))))); };
+        JobService jobs = new JobService(parser, configured, settings,
+                new CalculationCoordinator(new GridRoutePlannerFactory(rules),
+                        new DefaultVariantCalculator(rules, new DefaultSpatialValidator(rules)), settings), new GeoJsonResultExporter());
+        String id;
+        try {
+            byte[] input;
+            try (InputStream fixture = getClass().getResourceAsStream("/fixtures/synthetic/two-consumers/input.geojson")) {
+                input = fixture.readAllBytes();
+            }
+            id = jobs.submit(new MockMultipartFile("file", input), "2d").jobId;
+            assertTrue(failedWrite.await(10, TimeUnit.SECONDS));
+            assertFalse(jobs.get(id).terminal(), "Uncommitted outcome must not be exposed as durable");
+            jobs.retryCompletions();
+            assertEquals(503, assertThrows(ApiException.class, () -> jobs.submit(upload(), "2d")).status);
+            assertEquals(409, assertThrows(ApiException.class, () -> jobs.download(id)).status);
+            blocked.set(false);
+            jobs.retryCompletions();
+            assertEquals(successfulCalculation ? JobView.Status.SUCCEEDED : JobView.Status.FAILED, terminal(jobs, id).status);
+            if (successfulCalculation) {
+                try (InputStream result = jobs.download(id).stream) { assertTrue(result.read() >= 0); }
+            } else assertEquals("INVALID_GEOMETRY", jobs.get(id).diagnostics.get(0).code);
+            jobs.retryCompletions(); // must not release admission a second time
+            assertEquals(1, ((java.util.concurrent.Semaphore) org.springframework.test.util.ReflectionTestUtils.getField(jobs, "admission")).availablePermits());
+        } finally { blocked.set(false); jobs.destroy(); }
+        try (FileJobStore restarted = new FileJobStore(settings.getStorageDirectory(), mapper)) {
+            restarted.recover();
+            assertEquals(successfulCalculation ? JobView.Status.SUCCEEDED : JobView.Status.FAILED, restarted.get(id).status);
+        }
+    }
 
     @Test void boundedAdmissionKeepsQueuedWorkAndReleasesSlotsAfterFailure() throws Exception {
         CountDownLatch started = new CountDownLatch(1);
