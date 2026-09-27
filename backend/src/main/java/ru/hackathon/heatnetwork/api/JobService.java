@@ -40,6 +40,8 @@ public final class JobService implements DisposableBean {
     private final ScheduledExecutorService maintenance;
     private final Semaphore admission;
     private final Set<String> active = ConcurrentHashMap.newKeySet();
+    // Bounded by admission capacity; only small terminal snapshots, never Dataset/graphs.
+    private final ConcurrentMap<String, Completion> completions = new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock();
     private boolean stopping;
 
@@ -64,6 +66,7 @@ public final class JobService implements DisposableBean {
         workers = new ThreadPoolExecutor(properties.getWorkers(), properties.getWorkers(), 0,
                 TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(capacity), threads("heat-job-"));
         maintenance = Executors.newSingleThreadScheduledExecutor(threads("heat-job-cleanup-"));
+        maintenance.scheduleWithFixedDelay(this::retryCompletions, 5, 5, TimeUnit.SECONDS);
         maintenance.scheduleWithFixedDelay(this::expire, 60, 60, TimeUnit.SECONDS);
         expire();
     }
@@ -188,24 +191,44 @@ public final class JobService implements DisposableBean {
         void cancelBeforeStart() { finish(interrupted(job)); }
 
         private void finish(JobView terminal) {
+            Completion completion = new Completion(terminal);
+            completions.put(job.jobId, completion);
+            completion.persist();
+        }
+    }
+
+    private final class Completion {
+        private final JobView terminal;
+        private boolean persisted;
+
+        Completion(JobView terminal) { this.terminal = terminal; }
+
+        synchronized void persist() {
+            if (persisted) return;
             // Clear cancellation while persisting the final state: NIO can reject interrupted I/O.
             boolean interrupted = Thread.interrupted();
             try {
-                try { store.removeInput(job.jobId); }
-                catch (IOException exception) { LOG.error("Cannot remove input for job {}", job.jobId, exception); }
+                try { store.removeInput(terminal.jobId); }
+                catch (IOException exception) { LOG.error("Cannot remove input for job {}", terminal.jobId, exception); }
                 if (terminal.status != JobView.Status.SUCCEEDED) {
-                    try { store.removeResult(job.jobId); }
-                    catch (IOException exception) { LOG.error("Cannot remove result for job {}", job.jobId, exception); }
+                    try { store.removeResult(terminal.jobId); }
+                    catch (IOException exception) { LOG.error("Cannot remove result for job {}", terminal.jobId, exception); }
                 }
                 store.save(terminal);
-            } catch (IOException exception) {
-                LOG.error("Cannot persist terminal state for job {}", job.jobId, exception);
-            } finally {
-                active.remove(job.jobId);
+                persisted = true;
+                completions.remove(terminal.jobId, this);
+                active.remove(terminal.jobId);
                 admission.release();
+            } catch (IOException | RuntimeException exception) {
+                LOG.error("Cannot persist terminal state for job {}; retaining for retry", terminal.jobId, exception);
+            } finally {
                 if (interrupted) Thread.currentThread().interrupt();
             }
         }
+    }
+
+    void retryCompletions() {
+        for (Completion completion : completions.values()) completion.persist();
     }
 
     private static JobView interrupted(JobView job) {
@@ -226,7 +249,11 @@ public final class JobService implements DisposableBean {
             for (Runnable pending : workers.shutdownNow()) ((Work) pending).cancelBeforeStart();
             boolean terminated = workers.awaitTermination(30, TimeUnit.SECONDS);
             boolean maintenanceStopped = maintenance.awaitTermination(5, TimeUnit.SECONDS);
-            if (terminated && maintenanceStopped) store.close();
+            if (terminated && maintenanceStopped) {
+                retryCompletions();
+                if (!completions.isEmpty()) LOG.error("{} terminal job states remain unsaved at shutdown", completions.size());
+                store.close();
+            }
             else LOG.error("Job workers did not stop in time; storage remains locked until process exit");
         } finally { lifecycle.writeLock().unlock(); }
     }
