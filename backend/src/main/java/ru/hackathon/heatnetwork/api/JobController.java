@@ -112,6 +112,22 @@ public class JobController {
         }
     }
 
+    @GetMapping(value = "/{jobId}/map/bounds", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "getMapBounds", summary = "Границы исходных объектов и выбранного варианта в WGS84")
+    @Parameter(name = "variantId", in = ParameterIn.QUERY, required = true, schema = @Schema(type = "string"))
+    @ApiResponse(responseCode = "200", description = "Объединённые границы; bbox=null для пустой карты", content = @Content(schema = @Schema(implementation = MapBoundsView.class)))
+    @ApiResponse(responseCode = "400", description = "Некорректный запрос", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "404", description = "Задача или вариант не найдены", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "409", description = "Данные карты недоступны", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public ResponseEntity<MapBoundsView> bounds(@PathVariable String jobId,
+            @Parameter(hidden = true) @RequestParam MultiValueMap<String, String> parameters) throws IOException {
+        for (java.util.Map.Entry<String, List<String>> entry : parameters.entrySet()) {
+            if (!"variantId".equals(entry.getKey()) || entry.getValue().size() != 1)
+                throw MapQuery.bad("INVALID_MAP_QUERY", "Передайте только один параметр variantId.");
+        }
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(jobs.bounds(jobId, parameters.getFirst("variantId")));
+    }
+
     /** Documentation schema only; production pages are written from disk without a feature tree. */
     @Schema(name = "MapPage")
     public static final class MapPageView {

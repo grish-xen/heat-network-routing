@@ -93,6 +93,26 @@ class MapArchiveTest {
         assertEquals("INVALID_LIMIT", assertThrows(ApiException.class, () -> query("job", "input", "37,55,38,56", null, limit, null)).error.code);
     }
 
+    @Test void boundsScanAllIndexBlocksWithoutReadingGeometryAndExcludeOtherVariants() throws Exception {
+        List<String> features = new ArrayList<>();
+        for (int i = 0; i < 1025; i++) features.add(feature(Integer.toString(i), "Point", "[38,55]", ",\"variant_id\":\"v1\""));
+        features.add(feature("2000", "LineString", "[[37,54],[39,56]]", ",\"variant_id\":\"v1\""));
+        features.add(feature("2001", "Point", "[-170,-80]", ",\"variant_id\":\"v2\""));
+        build(String.join(",", features), List.of("v1", "v2"));
+        Files.writeString(directory.resolve("data"), "not geometry");
+        try (MapArchive.Reader archive = reader()) {
+            assertArrayEquals(new double[] {37,54,39,56}, archive.bounds(1));
+            assertArrayEquals(new double[] {-170,-80,-170,-80}, archive.bounds(2));
+            assertNull(archive.bounds(3));
+        }
+    }
+
+    @Test void emptyArchiveHasNullBounds() throws Exception {
+        build("", null);
+        try (MapArchive.Reader archive = reader()) { assertNull(archive.bounds(0)); }
+        assertEquals("{\"bbox\":null}", mapper.writeValueAsString(new MapBoundsView(null)));
+    }
+
     private void build(String features, List<String> variants) throws IOException {
         Path source = directory.resolve("source.geojson");
         Files.writeString(source, "{\"type\":\"FeatureCollection\",\"features\":[" + features + "]}");

@@ -157,6 +157,30 @@ final class MapArchive {
             catch (IOException failure) { this.data.close(); throw failure; }
         }
         Page select(MapQuery query, int variant) throws IOException { return select(query, variant, MAX_PAGE_BYTES); }
+        /** Reads only the fixed-size index; geometry bytes and page limits are irrelevant. */
+        double[] bounds(int variant) throws IOException {
+            index.seek(0);
+            if (index.readLong() != MAGIC || (index.length() - 8) % RECORD_BYTES != 0) throw new IOException("Invalid map index");
+            long count = (index.length() - 8) / RECORD_BYTES;
+            Bounds bounds = new Bounds();
+            ByteBuffer block = ByteBuffer.allocate(RECORD_BYTES * 1024);
+            for (long start = 0; start < count; start += 1024) {
+                CalculationCoordinator.interrupted();
+                int records = (int) Math.min(count - start, 1024);
+                index.readFully(block.array(), 0, records * RECORD_BYTES);
+                block.clear();
+                for (int i = 0; i < records; i++) {
+                    block.getLong(); block.getLong();
+                    double minX = block.getDouble(), minY = block.getDouble();
+                    double maxX = block.getDouble(), maxY = block.getDouble();
+                    if (block.getInt() == variant) {
+                        bounds.add(minX, minY);
+                        bounds.add(maxX, maxY);
+                    }
+                }
+            }
+            return bounds.empty() ? null : new double[] {bounds.minX, bounds.minY, bounds.maxX, bounds.maxY};
+        }
         Page select(MapQuery query, int variant, long maxPageBytes) throws IOException {
             index.seek(0);
             if (index.readLong() != MAGIC || (index.length() - 8) % RECORD_BYTES != 0) throw new IOException("Invalid map index");

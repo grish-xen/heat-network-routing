@@ -100,8 +100,13 @@ final class FileJobStore implements AutoCloseable {
 
     // Acquire the file handles before retention cleanup can delete them; scanning does not hold this monitor.
     synchronized MapArchive.Reader openMap(String id, MapQuery query) throws IOException {
+        return openMap(id, query.layer);
+    }
+
+    synchronized MapArchive.Reader openMap(String id, String layer) throws IOException {
         requireResult(id);
-        String prefix = ".map-" + query.layer;
+        if (!"input".equals(layer) && !"result".equals(layer)) throw new IllegalArgumentException("Invalid map layer");
+        String prefix = ".map-" + layer;
         if (!Files.isRegularFile(path(id, prefix + ".data")) || !Files.isRegularFile(path(id, prefix + ".index"))) {
             throw new ApiException(409, "MAP_DATA_UNAVAILABLE", "Данные карты не сохранены для этой задачи. Загрузите исходный файл повторно.");
         }
@@ -111,9 +116,13 @@ final class FileJobStore implements AutoCloseable {
     synchronized int mapVariant(String id, MapQuery query) throws IOException {
         requireResult(id);
         if ("input".equals(query.layer)) return 0;
+        return mapVariant(id, query.variantId);
+    }
+
+    synchronized int mapVariant(String id, String variantId) throws IOException {
         List<VariantSummaryView> views = variants(id);
         for (int i = 0; i < views.size(); i++) {
-            if (query.variantId.equals(views.get(i).variantId.value().textValue())) return i + 1;
+            if (variantId.equals(views.get(i).variantId.value().textValue())) return i + 1;
         }
         throw new ApiException(404, "VARIANT_NOT_FOUND", "Вариант не найден в этой задаче.");
     }

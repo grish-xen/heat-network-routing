@@ -91,6 +91,20 @@ class JobApiTest {
         java.util.List<JsonNode> expectedResult = new java.util.ArrayList<>();
         collection.path("features").forEach(feature -> { if (!feature.path("geometry").isNull()) expectedResult.add(feature); });
         assertEquals(expectedResult, resultFeatures);
+        ResponseEntity<JsonNode> bounds = http.getForEntity(location + "/map/bounds?variantId=" + variantId, JsonNode.class);
+        assertEquals(200, bounds.getStatusCodeValue());
+        assertEquals("no-store", bounds.getHeaders().getCacheControl());
+        assertEquals(1, bounds.getBody().size());
+        double[] expectedBounds = {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY};
+        for (JsonNode feature : expectedInput) extendBounds(expectedBounds, feature.path("geometry").path("coordinates"));
+        for (JsonNode feature : expectedResult) extendBounds(expectedBounds, feature.path("geometry").path("coordinates"));
+        for (int i = 0; i < 4; i++) assertEquals(expectedBounds[i], bounds.getBody().path("bbox").get(i).asDouble());
+        assertContract("/api/jobs/{jobId}/map/bounds", "get", "200", bounds.getBody());
+        assertError(404, "VARIANT_NOT_FOUND", http.getForEntity(location + "/map/bounds?variantId=absent", JsonNode.class));
+        assertError(400, "INVALID_VARIANT", http.getForEntity(location + "/map/bounds", JsonNode.class));
+        assertError(400, "INVALID_VARIANT", http.getForEntity(location + "/map/bounds?variantId=", JsonNode.class));
+        assertError(400, "INVALID_MAP_QUERY", http.getForEntity(location + "/map/bounds?variantId=a&variantId=b", JsonNode.class));
+        assertError(400, "INVALID_MAP_QUERY", http.getForEntity(location + "/map/bounds?variantId=a&bbox=0,0,1,1", JsonNode.class));
         assertEquals(0, http.getForObject(location + "/map?layer=input&bbox=0,0,1,1", JsonNode.class).path("features").size());
         assertError(404, "VARIANT_NOT_FOUND", http.getForEntity(location + "/map?layer=result&variantId=absent&bbox=0,0,1,1", JsonNode.class));
         assertError(400, "INVALID_VARIANT", http.getForEntity(location + "/map?layer=result&bbox=0,0,1,1", JsonNode.class));
@@ -106,6 +120,7 @@ class JobApiTest {
         assertEquals(202, accepted.getStatusCodeValue());
         JsonNode result = completed(accepted.getHeaders().getLocation().toString());
         assertEquals("INVALID_INPUT", result.at("/diagnostics/0/code").asText());
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/map/bounds?variantId=variant-1", JsonNode.class));
         assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/variants", JsonNode.class));
         assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/result", JsonNode.class));
         assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/map?layer=input&bbox=0,0,1,1", JsonNode.class));
@@ -158,16 +173,26 @@ class JobApiTest {
         assertEquals("listVariants", spec.at("/paths/~1api~1jobs~1{jobId}~1variants/get/operationId").asText());
         assertEquals("downloadResult", spec.at("/paths/~1api~1jobs~1{jobId}~1result/get/operationId").asText());
         assertEquals("getMapPage", spec.at("/paths/~1api~1jobs~1{jobId}~1map/get/operationId").asText());
+        assertEquals("getMapBounds", spec.at("/paths/~1api~1jobs~1{jobId}~1map~1bounds/get/operationId").asText());
     }
 
     @Test void missingResultsUseJson404ForBothEndpoints() {
         for (String id : new String[] {UUID.randomUUID().toString(), "invalid-id"}) {
-            for (String endpoint : new String[] {"variants", "result"}) {
+            for (String endpoint : new String[] {"variants", "result", "map/bounds?variantId=variant-1"}) {
                 ResponseEntity<JsonNode> response = http.getForEntity("/api/jobs/" + id + "/" + endpoint, JsonNode.class);
                 assertError(404, "JOB_NOT_FOUND", response);
                 assertTrue(MediaType.APPLICATION_JSON.isCompatibleWith(response.getHeaders().getContentType()));
             }
         }
+    }
+
+    private static void extendBounds(double[] bounds, JsonNode coordinates) {
+        if (coordinates.size() >= 2 && coordinates.get(0).isNumber()) {
+            bounds[0] = Math.min(bounds[0], coordinates.get(0).asDouble());
+            bounds[1] = Math.min(bounds[1], coordinates.get(1).asDouble());
+            bounds[2] = Math.max(bounds[2], coordinates.get(0).asDouble());
+            bounds[3] = Math.max(bounds[3], coordinates.get(1).asDouble());
+        } else for (JsonNode child : coordinates) extendBounds(bounds, child);
     }
 
     private JsonNode completed(String location) {

@@ -116,6 +116,21 @@ public final class JobService implements DisposableBean {
         }
     }
 
+    MapBoundsView bounds(String id, String variantId) throws IOException {
+        if (variantId == null || variantId.isBlank()) throw MapQuery.bad("INVALID_VARIANT", "Укажите variantId.");
+        int variant = store.mapVariant(id, variantId);
+        try (MapArchive.Reader input = store.openMap(id, "input");
+             MapArchive.Reader result = store.openMap(id, "result")) {
+            double[] a = input.bounds(0), b = result.bounds(variant);
+            if (a == null) return new MapBoundsView(b);
+            if (b != null) {
+                a[0] = Math.min(a[0], b[0]); a[1] = Math.min(a[1], b[1]);
+                a[2] = Math.max(a[2], b[2]); a[3] = Math.max(a[3], b[3]);
+            }
+            return new MapBoundsView(a);
+        }
+    }
+
     private void copyUpload(MultipartFile file, String id) throws IOException {
         // The original filename never participates in path construction.
         try (InputStream input = file.getInputStream();
