@@ -14,6 +14,7 @@ function apiWith(getJob: HeatNetworkApi['getJob']): HeatNetworkApi {
     createJob: vi.fn(),
     getJob,
     listVariants: vi.fn(),
+    getMapBounds: vi.fn(),
     getMapPage: vi.fn(),
     getResultUrl: vi.fn(),
   }

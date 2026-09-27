@@ -20,7 +20,7 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> api(ApiException exception) {
         ResponseEntity.BodyBuilder response = ResponseEntity.status(exception.status);
         if (exception.status == 503) response.header("Retry-After", "5");
-        return response.body(exception.error);
+        return response.contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(exception.error);
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
@@ -41,6 +41,7 @@ public class ApiExceptionHandler {
     @ExceptionHandler({IOException.class, RuntimeException.class})
     public ResponseEntity<ApiError> internal(Exception exception) {
         LOG.error("HTTP request failed", exception);
-        return ResponseEntity.status(500).body(new ApiError("INTERNAL_ERROR", "Не удалось выполнить запрос из-за ошибки сервера."));
+        return ResponseEntity.status(500).contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body(new ApiError("INTERNAL_ERROR", "Не удалось выполнить запрос из-за ошибки сервера."));
     }
 }

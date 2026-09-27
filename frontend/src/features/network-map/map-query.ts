@@ -8,6 +8,15 @@ export interface ViewportBbox {
   readonly maxLat: number
 }
 
+const DEGENERATE_BOUNDS_PADDING_DEGREES = 0.0001
+
+function expandAxis(value: number, minimum: number, maximum: number): readonly [number, number] {
+  return [
+    Math.max(minimum, value - DEGENERATE_BOUNDS_PADDING_DEGREES),
+    Math.min(maximum, value + DEGENERATE_BOUNDS_PADDING_DEGREES),
+  ]
+}
+
 function validateBbox(bbox: ViewportBbox): void {
   const values = [bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat]
   if (!values.every(Number.isFinite)) throw new Error('Границы карты должны быть конечными числами')
@@ -24,6 +33,18 @@ export function serializeBbox(bbox: ViewportBbox): string {
 export function toBboxTuple(bbox: ViewportBbox): MapQuery['bbox'] {
   validateBbox(bbox)
   return [bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat]
+}
+
+export function expandBoundsForMapQuery(bounds: MapQuery['bbox']): MapQuery['bbox'] {
+  const [minLon, minLat, maxLon, maxLat] = bounds
+  if (minLon > maxLon || minLat > maxLat) throw new Error('Границы карты должны возрастать')
+  const [queryMinLon, queryMaxLon] = minLon === maxLon
+    ? expandAxis(minLon, -180, 180)
+    : [minLon, maxLon]
+  const [queryMinLat, queryMaxLat] = minLat === maxLat
+    ? expandAxis(minLat, -90, 90)
+    : [minLat, maxLat]
+  return toBboxTuple({ minLon: queryMinLon, minLat: queryMinLat, maxLon: queryMaxLon, maxLat: queryMaxLat })
 }
 
 export function mapQueryKey(jobId: string, query: MapQuery) {

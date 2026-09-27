@@ -2,6 +2,10 @@
 backend/target/
 *.class
 
+# Python validation scripts
+__pycache__/
+*.pyc
+
 # Frontend
 frontend/node_modules/
 frontend/dist/
@@ -25,3 +29,6 @@ results/
 
 # Portable local tooling (if a participant downloads it into the repository)
 .build-tools/
+
+# Local Git worktrees
+.worktrees/

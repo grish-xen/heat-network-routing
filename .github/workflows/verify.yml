@@ -17,6 +17,40 @@ jobs:
         with:
           python-version: '3.12'
       - run: python scripts/check_repository.py
+      - name: Smoke test packaged backend over HTTP
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          java -Xmx512m -jar backend/target/heat-network-routing-0.1.0-SNAPSHOT.jar \
+            --server.address=127.0.0.1 --server.port=18080 \
+            --heat-network.jobs.storage-directory="$RUNNER_TEMP/smoke-jobs" \
+            --heat-network.input.storage-directory="$RUNNER_TEMP/smoke-datasets" \
+            > "$RUNNER_TEMP/api-smoke-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in {1..60}; do
+            if curl --silent --fail --max-time 1 http://127.0.0.1:18080/api/health > /dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            cat "$RUNNER_TEMP/api-smoke-server.log"
+            exit 1
+          fi
+          python scripts/smoke_api.py --base-url http://127.0.0.1:18080 \
+            --require-full-connection --report "$RUNNER_TEMP/api-smoke.json" || {
+              cat "$RUNNER_TEMP/api-smoke-server.log"
+              exit 1
+            }
+          python scripts/check_concurrent_api.py --base-url http://127.0.0.1:18080 \
+            --clients 4 --report "$RUNNER_TEMP/api-concurrent.json" || {
+              cat "$RUNNER_TEMP/api-smoke-server.log"
+              exit 1
+            }
       - run: python -m pip install -r scripts/requirements-checks.txt
       - run: python -m openapi_spec_validator contracts/openapi.json
       - run: docker compose config --quiet

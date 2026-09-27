@@ -3,7 +3,8 @@ import { parse, stringify } from 'lossless-json'
 import inputMapText from '../../../../test-data/api/map-input.json?raw'
 import variantsText from '../../../../test-data/api/variants.json?raw'
 import resultMapText from '../../../../test-data/synthetic/two-consumers/expected.geojson?raw'
-import type { Geometry, Health, Job, MapFeature, MapPage, MapQuery, VariantSummary } from '../model/api'
+import type { Geometry, Health, Job, MapBounds, MapFeature, MapPage, MapQuery, VariantSummary } from '../model/api'
+import type { ObjectId } from '../model/object-id'
 import { objectIdKey } from '../model/object-id'
 import { ApiClientError } from './api-error'
 import type { HeatNetworkApi } from './contracts'
@@ -60,6 +61,14 @@ function intersects(feature: MapFeature, bbox: MapQuery['bbox']): boolean {
   )
 }
 
+function boundsFor(features: readonly MapFeature[]): MapBounds {
+  const coordinates = features.flatMap((feature) => positions(feature.geometry))
+  if (coordinates.length === 0) return null
+  const longitudes = coordinates.map(([longitude]) => longitude)
+  const latitudes = coordinates.map(([, latitude]) => latitude)
+  return [Math.min(...longitudes), Math.min(...latitudes), Math.max(...longitudes), Math.max(...latitudes)]
+}
+
 export class FixtureHeatNetworkApi implements HeatNetworkApi {
   readonly #now: () => number
   readonly #jobs = new Map<string, number>()
@@ -89,6 +98,15 @@ export class FixtureHeatNetworkApi implements HeatNetworkApi {
   async listVariants(jobId: string): Promise<readonly VariantSummary[]> {
     this.#requireJob(jobId)
     return fixtureVariants
+  }
+
+  async getMapBounds(jobId: string, variantId: ObjectId): Promise<MapBounds> {
+    this.#requireJob(jobId)
+    const key = objectIdKey(variantId)
+    return boundsFor([
+      ...inputFeatures,
+      ...resultFeatures.filter((feature) => feature.properties.variantId && objectIdKey(feature.properties.variantId) === key),
+    ])
   }
 
   async getMapPage(jobId: string, query: MapQuery): Promise<MapPage> {

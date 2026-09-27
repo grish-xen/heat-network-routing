@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { mapQueryKey, serializeBbox, toBboxTuple } from './map-query'
+import { expandBoundsForMapQuery, mapQueryKey, serializeBbox, toBboxTuple } from './map-query'
 
 describe('map query', () => {
   it('serializes a validated EPSG:4326 bbox without locale formatting', () => {
@@ -15,6 +15,16 @@ describe('map query', () => {
     { minLon: 1, minLat: 0, maxLon: 1, maxLat: 1 },
     { minLon: 0, minLat: 2, maxLon: 1, maxLat: 1 },
   ])('rejects invalid bounds %#', (bbox) => expect(() => serializeBbox(bbox)).toThrow())
+
+  it('expands a point bounds into a valid query rectangle without moving its center', () => {
+    const bbox = expandBoundsForMapQuery([37.4, 55.6, 37.4, 55.6])
+
+    expect(bbox[0]).toBeLessThan(37.4)
+    expect(bbox[1]).toBeLessThan(55.6)
+    expect(bbox[2]).toBeGreaterThan(37.4)
+    expect(bbox[3]).toBeGreaterThan(55.6)
+    expect(() => serializeBbox({ minLon: bbox[0], minLat: bbox[1], maxLon: bbox[2], maxLat: bbox[3] })).not.toThrow()
+  })
 
   it('makes bbox and exact variant identity part of the cache key', () => {
     const base = { layer: 'result' as const, bbox: [37.4, 55.6, 37.5, 55.7] as const, limit: 1000 }

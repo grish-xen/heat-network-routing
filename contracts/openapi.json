@@ -3,7 +3,7 @@
   "info": {
     "title": "Heat Network Routing team API",
     "version": "1.0.0",
-    "description": "Version 1 integration contract. Health, upload and job status are implemented. Routing/calculation/export are not connected: valid inputs currently end in FAILED with PROCESSING_UNAVAILABLE. Variants, result download and map remain planned."
+    "description": "Version 1 integration contract. Health, upload, job status, ranked variants, streamed result download and paginated map are implemented. Jobs parse, route, calculate, validate, export and persist map archives."
   },
   "paths": {
     "/api/health": {
@@ -158,7 +158,7 @@
             }
           }
         },
-        "description": "Exactly one nonempty multipart file named file. mode defaults to 2d when omitted. An empty/unknown/duplicate mode is invalid; depth is currently unsupported. The original filename is ignored. Default file limit: 3 GiB; request limit: file limit + 1 MiB. Limits may be lowered by server configuration."
+        "description": "Accepts the upload, then asynchronously validates, routes, calculates and exports. SUCCEEDED means the result and summaries have been saved. Partial connection is reported in summaries and diagnostics."
       }
     },
     "/api/jobs/{jobId}": {
@@ -230,7 +230,7 @@
       ],
       "get": {
         "operationId": "listVariants",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "responses": {
           "200": {
             "description": "Ranked summaries using official snake_case fields.",
@@ -265,6 +265,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Storage or internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -282,7 +292,7 @@
       ],
       "get": {
         "operationId": "downloadResult",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "responses": {
           "200": {
             "description": "Streamed GeoJSON attachment, up to 500 MiB.",
@@ -314,6 +324,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Storage or internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -331,7 +351,7 @@
       ],
       "get": {
         "operationId": "getMapPage",
-        "x-implementation": "planned",
+        "x-implementation": "implemented",
         "parameters": [
           {
             "name": "layer",
@@ -348,7 +368,7 @@
           {
             "name": "variantId",
             "in": "query",
-            "description": "Required for result layer; server-issued variant IDs are strings.",
+            "description": "Required for result, forbidden for input. Server-issued variant IDs are strings, from this job.",
             "schema": {
               "type": "string"
             }
@@ -357,7 +377,7 @@
             "name": "bbox",
             "in": "query",
             "required": true,
-            "description": "minLon,minLat,maxLon,maxLat in EPSG:4326",
+            "description": "minLon,minLat,maxLon,maxLat in EPSG:4326; finite numbers, longitude [-180,180], latitude [-90,90], min < max. No antimeridian wrapping.",
             "schema": {
               "type": "string"
             }
@@ -377,7 +397,8 @@
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Opaque cursor from nextCursor, bound to all query parameters. Omit on first page or when viewport changes."
           }
         ],
         "responses": {
@@ -387,6 +408,96 @@
               "application/geo+json": {
                 "schema": {
                   "$ref": "#/components/schemas/MapPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid map query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown job or variant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Data not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "A single feature cannot fit in the 8 MiB page budget (MAP_FEATURE_TOO_LARGE). Smaller bbox does not clip the feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Available after SUCCEEDED. Selects features whose WGS84 bounding rectangles intersect bbox, without clipping. Input positions are 2D; result excludes summaries. Pages contain at most limit features and 8 MiB including envelope. Reuse nextCursor with the same job, layer, variantId, bbox and limit. Null nextCursor ends the query. Legacy jobs without map archives require reupload."
+      }
+    },
+    "/api/jobs/{jobId}/map/bounds": {
+      "parameters": [
+        {
+          "name": "jobId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getMapBounds",
+        "description": "Available after SUCCEEDED / DONE. Exact WGS84 union of all input geometries and the selected result variant, read from disk indexes without loading geometry. bbox is null if both layers are empty. Degenerate bounds are not padded. Only variantId is accepted; duplicate parameters are rejected.",
+        "parameters": [
+          {
+            "name": "variantId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Combined extent. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapBounds"
                 }
               }
             }
@@ -436,7 +547,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, PROCESSING_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. This is an extensible string, not a closed enum."
+            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, RESULT_NOT_READY, ROUTE_NOT_FOUND, OUTPUT_LIMIT_EXCEEDED, RESULT_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. Legacy PROCESSING_UNAVAILABLE may remain in stored jobs from older versions. This is an extensible string, not a closed enum. Map errors include INVALID_LAYER, INVALID_BBOX, INVALID_VARIANT, INVALID_LIMIT, INVALID_CURSOR, INVALID_MAP_QUERY, VARIANT_NOT_FOUND, MAP_DATA_UNAVAILABLE and MAP_FEATURE_TOO_LARGE."
           },
           "message": {
             "type": "string"
@@ -468,7 +579,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/MapFeature"
-            }
+            },
+            "maxItems": 5000
           },
           "nextCursor": {
             "type": "string",
@@ -844,6 +956,26 @@
           }
         },
         "description": "QUEUED is returned after the upload is stored. VALIDATING parses the input asynchronously. SUCCEEDED/DONE is reserved for finished calculation and export; validation alone cannot succeed a job. Terminal states are retained for 24 hours by default; expired or unknown jobs return 404."
+      },
+      "MapBounds": {
+        "type": "object",
+        "required": [
+          "bbox"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "bbox": {
+            "type": "array",
+            "nullable": true,
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "[minLon,minLat,maxLon,maxLat] in WGS84; null for empty union. Minima may equal maxima."
+          }
+        }
       }
     }
   }

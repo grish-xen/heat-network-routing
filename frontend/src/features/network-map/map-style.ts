@@ -1,4 +1,4 @@
-import type { MapObjectType } from '../../shared/model/api'
+import type { MapFeatureProperties, MapObjectType } from '../../shared/model/api'
 import type { ObjectId } from '../../shared/model/object-id'
 import { objectIdKey } from '../../shared/model/object-id'
 
@@ -61,3 +61,12 @@ export const MAP_LAYER_DEFINITIONS: readonly MapLayerDefinition[] = [
 ]
 
 export const mapFeatureId = (id: ObjectId): string => objectIdKey(id)
+
+export function mapSourceFeatureId(
+  properties: Pick<MapFeatureProperties, 'id' | 'objectType' | 'variantId'>,
+): string {
+  if (properties.variantId) {
+    return `result:${objectIdKey(properties.variantId)}:${objectIdKey(properties.id)}`
+  }
+  return `input:${properties.objectType}:${objectIdKey(properties.id)}`
+}

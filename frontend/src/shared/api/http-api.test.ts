@@ -55,6 +55,20 @@ describe('HttpHeatNetworkApi', () => {
     })
   })
 
+  it('requests the exact selected variant bounds without geometry', async () => {
+    server.use(
+      http.get(`${baseUrl}/api/jobs/job-1/map/bounds`, ({ request }) => {
+        const url = new URL(request.url)
+        expect(url.searchParams.get('variantId')).toBe('9007199254740993')
+        return HttpResponse.json({ bbox: [37.4, 55.6, 37.5, 55.7] })
+      }),
+    )
+    const api = new HttpHeatNetworkApi(baseUrl)
+
+    await expect(api.getMapBounds('job-1', { kind: 'number', value: '9007199254740993' }))
+      .resolves.toEqual([37.4, 55.6, 37.5, 55.7])
+  })
+
   it('throws a structured API error and keeps Retry-After', async () => {
     server.use(
       http.get(`${baseUrl}/api/jobs/job-1`, () =>

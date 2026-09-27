@@ -24,22 +24,32 @@ import org.springframework.web.multipart.MultipartFile;
 import ru.hackathon.heatnetwork.input.InputParser;
 import ru.hackathon.heatnetwork.input.InvalidInputException;
 import ru.hackathon.heatnetwork.model.Dataset;
+import ru.hackathon.heatnetwork.model.Model.CalculatedVariant;
+import ru.hackathon.heatnetwork.output.ResultExporter;
+import ru.hackathon.heatnetwork.output.OutputLimitExceededException;
 
 @Service
 public final class JobService implements DisposableBean {
     private static final Logger LOG = LoggerFactory.getLogger(JobService.class);
     private final InputParser parser;
+    private final CalculationCoordinator coordinator;
+    private final ResultExporter exporter;
     private final JobProperties properties;
     private final FileJobStore store;
     private final ThreadPoolExecutor workers;
     private final ScheduledExecutorService maintenance;
     private final Semaphore admission;
     private final Set<String> active = ConcurrentHashMap.newKeySet();
+    // Bounded by admission capacity; only small terminal snapshots, never Dataset/graphs.
+    private final ConcurrentMap<String, Completion> completions = new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock();
     private boolean stopping;
 
-    public JobService(InputParser parser, ObjectMapper mapper, JobProperties properties) throws IOException {
+    public JobService(InputParser parser, ObjectMapper mapper, JobProperties properties,
+                      CalculationCoordinator coordinator, ResultExporter exporter) throws IOException {
         this.parser = parser;
+        this.coordinator = coordinator;
+        this.exporter = exporter;
         this.properties = properties;
         if (properties.getRetention().isNegative() || properties.getRetention().isZero()) {
             throw new IllegalArgumentException("Job retention must be positive");
@@ -56,6 +66,7 @@ public final class JobService implements DisposableBean {
         workers = new ThreadPoolExecutor(properties.getWorkers(), properties.getWorkers(), 0,
                 TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(capacity), threads("heat-job-"));
         maintenance = Executors.newSingleThreadScheduledExecutor(threads("heat-job-cleanup-"));
+        maintenance.scheduleWithFixedDelay(this::retryCompletions, 5, 5, TimeUnit.SECONDS);
         maintenance.scheduleWithFixedDelay(this::expire, 60, 60, TimeUnit.SECONDS);
         expire();
     }
@@ -95,6 +106,34 @@ public final class JobService implements DisposableBean {
         try { return store.get(id); } catch (NoSuchFileException exception) { throw notFound(); }
     }
 
+    public List<VariantSummaryView> variants(String id) throws IOException { return store.variants(id); }
+    FileJobStore.Download download(String id) throws IOException { return store.download(id); }
+
+    MapArchive.Page map(String id, MapQuery query) throws IOException {
+        int variant = store.mapVariant(id, query);
+        MapArchive.Reader archive = store.openMap(id, query);
+        try { return archive.select(query, variant); }
+        catch (IOException | RuntimeException exception) {
+            try { archive.close(); } catch (IOException closing) { exception.addSuppressed(closing); }
+            throw exception;
+        }
+    }
+
+    MapBoundsView bounds(String id, String variantId) throws IOException {
+        if (variantId == null || variantId.isBlank()) throw MapQuery.bad("INVALID_VARIANT", "Укажите variantId.");
+        int variant = store.mapVariant(id, variantId);
+        try (MapArchive.Reader input = store.openMap(id, "input");
+             MapArchive.Reader result = store.openMap(id, "result")) {
+            double[] a = input.bounds(0), b = result.bounds(variant);
+            if (a == null) return new MapBoundsView(b);
+            if (b != null) {
+                a[0] = Math.min(a[0], b[0]); a[1] = Math.min(a[1], b[1]);
+                a[2] = Math.max(a[2], b[2]); a[3] = Math.max(a[3], b[3]);
+            }
+            return new MapBoundsView(a);
+        }
+    }
+
     private void copyUpload(MultipartFile file, String id) throws IOException {
         // The original filename never participates in path construction.
         try (InputStream input = file.getInputStream();
@@ -121,11 +160,19 @@ public final class JobService implements DisposableBean {
             try {
                 store.save(job.validating());
                 try (Dataset dataset = parser.parse(store.input(job.jobId))) {
-                    // Next integration step: pass this Dataset to the routing/calculation/export
-                    // coordinator. Validation alone must never produce SUCCEEDED or fake variants.
-                    terminal = job.failed(List.of(new ApiError("PROCESSING_UNAVAILABLE",
-                            "Файл прошёл проверку. Расчёт маршрутов пока недоступен; повторите загрузку после его подключения.")));
+                    List<CalculatedVariant> variants = coordinator.calculate(dataset, stage -> store.save(job.running(stage)));
+                    store.save(job.running(JobView.Stage.EXPORTING));
+                    store.writeResult(job.jobId, dataset, variants, exporter);
+                    store.writeMaps(job.jobId);
+                    CalculationCoordinator.interrupted();
+                    int missing = variants.get(0).unconnectedPointIds.size();
+                    terminal = job.succeeded(missing == 0 ? List.of() : List.of(new ApiError("ROUTE_NOT_FOUND",
+                            "В лучшем варианте не подключено точек: " + missing + ". Поиск завершён в пределах заданного бюджета.")));
                 }
+            } catch (CalculationCoordinator.NoValidVariantException exception) {
+                terminal = job.failed(exception.diagnostics);
+            } catch (OutputLimitExceededException exception) {
+                terminal = job.failed(List.of(new ApiError("OUTPUT_LIMIT_EXCEEDED", exception.getMessage())));
             } catch (InvalidInputException exception) {
                 terminal = job.failed(exception.getDiagnostics().stream().map(ApiError::from).collect(Collectors.toList()));
             } catch (Exception exception) {
@@ -144,20 +191,44 @@ public final class JobService implements DisposableBean {
         void cancelBeforeStart() { finish(interrupted(job)); }
 
         private void finish(JobView terminal) {
+            Completion completion = new Completion(terminal);
+            completions.put(job.jobId, completion);
+            completion.persist();
+        }
+    }
+
+    private final class Completion {
+        private final JobView terminal;
+        private boolean persisted;
+
+        Completion(JobView terminal) { this.terminal = terminal; }
+
+        synchronized void persist() {
+            if (persisted) return;
             // Clear cancellation while persisting the final state: NIO can reject interrupted I/O.
             boolean interrupted = Thread.interrupted();
             try {
-                try { store.removeInput(job.jobId); }
-                catch (IOException exception) { LOG.error("Cannot remove input for job {}", job.jobId, exception); }
+                try { store.removeInput(terminal.jobId); }
+                catch (IOException exception) { LOG.error("Cannot remove input for job {}", terminal.jobId, exception); }
+                if (terminal.status != JobView.Status.SUCCEEDED) {
+                    try { store.removeResult(terminal.jobId); }
+                    catch (IOException exception) { LOG.error("Cannot remove result for job {}", terminal.jobId, exception); }
+                }
                 store.save(terminal);
-            } catch (IOException exception) {
-                LOG.error("Cannot persist terminal state for job {}", job.jobId, exception);
-            } finally {
-                active.remove(job.jobId);
+                persisted = true;
+                completions.remove(terminal.jobId, this);
+                active.remove(terminal.jobId);
                 admission.release();
+            } catch (IOException | RuntimeException exception) {
+                LOG.error("Cannot persist terminal state for job {}; retaining for retry", terminal.jobId, exception);
+            } finally {
                 if (interrupted) Thread.currentThread().interrupt();
             }
         }
+    }
+
+    void retryCompletions() {
+        for (Completion completion : completions.values()) completion.persist();
     }
 
     private static JobView interrupted(JobView job) {
@@ -178,7 +249,11 @@ public final class JobService implements DisposableBean {
             for (Runnable pending : workers.shutdownNow()) ((Work) pending).cancelBeforeStart();
             boolean terminated = workers.awaitTermination(30, TimeUnit.SECONDS);
             boolean maintenanceStopped = maintenance.awaitTermination(5, TimeUnit.SECONDS);
-            if (terminated && maintenanceStopped) store.close();
+            if (terminated && maintenanceStopped) {
+                retryCompletions();
+                if (!completions.isEmpty()) LOG.error("{} terminal job states remain unsaved at shutdown", completions.size());
+                store.close();
+            }
             else LOG.error("Job workers did not stop in time; storage remains locked until process exit");
         } finally { lifecycle.writeLock().unlock(); }
     }

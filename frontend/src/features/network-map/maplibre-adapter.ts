@@ -11,16 +11,24 @@ import {
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
-import type { MapPage } from '../../shared/model/api'
+import type { MapBounds, MapPage } from '../../shared/model/api'
 import { objectIdKey } from '../../shared/model/object-id'
 import type { ViewportBbox } from './map-query'
-import { MAP_LAYER_DEFINITIONS, type LayerGroup, type MapLayerDefinition } from './map-style'
+import {
+  mapSourceFeatureId,
+  MAP_LAYER_DEFINITIONS,
+  type LayerGroup,
+  type MapLayerDefinition,
+} from './map-style'
 
 setWorkerUrl(workerUrl)
 
 const SOURCE_ID = 'network-features'
+const MAP_FIT_PADDING_PX = 48
+const MAP_FIT_MAX_ZOOM = 17
 
 export interface NetworkMapAdapter {
+  fitBounds(bounds: MapBounds): void
   setFeatureCollection(page: MapPage): void
   setLayerGroupVisibility(group: LayerGroup, visible: boolean): void
   destroy(): void
@@ -55,7 +63,7 @@ function toGeoJson(page: MapPage) {
     type: 'FeatureCollection' as const,
     features: page.features.map((feature) => ({
       type: 'Feature' as const,
-      id: objectIdKey(feature.properties.id),
+      id: mapSourceFeatureId(feature.properties),
       geometry: feature.geometry,
       properties: {
         id: objectIdKey(feature.properties.id),
@@ -88,6 +96,7 @@ export function createMapLibreAdapter(
     throw error
   }
   let pending: MapPage = { type: 'FeatureCollection', features: [], nextCursor: null }
+  let pendingBounds: MapBounds | undefined
   let ready = false
   const visibility = new Map<LayerGroup, boolean>()
 
@@ -111,6 +120,12 @@ export function createMapLibreAdapter(
       }
     }
     ready = true
+    if (pendingBounds) {
+      map.fitBounds(
+        [[pendingBounds[0], pendingBounds[1]], [pendingBounds[2], pendingBounds[3]]],
+        { padding: MAP_FIT_PADDING_PX, maxZoom: MAP_FIT_MAX_ZOOM, duration: 0 },
+      )
+    }
   })
   map.on('moveend', () => {
     const bounds = map.getBounds()
@@ -134,6 +149,16 @@ export function createMapLibreAdapter(
   }
 
   return {
+    fitBounds(bounds) {
+      if (!bounds) return
+      pendingBounds = bounds
+      if (ready) {
+        map.fitBounds(
+          [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
+          { padding: MAP_FIT_PADDING_PX, maxZoom: MAP_FIT_MAX_ZOOM, duration: 0 },
+        )
+      }
+    },
     setFeatureCollection(page) {
       pending = page
       if (ready) (map.getSource(SOURCE_ID) as GeoJSONSource).setData(toGeoJson(page) as never)

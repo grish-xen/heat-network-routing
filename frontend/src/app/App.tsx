@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { JobStatus } from '../features/job-status/JobStatus'
 import { useJob } from '../features/job-status/use-job'
 import { JobUpload } from '../features/job-upload/JobUpload'
-import { NetworkMap } from '../features/network-map/NetworkMap'
 import { ResultWorkspace } from '../features/results/ResultWorkspace'
 import { ServiceStatus } from '../features/service-status/ServiceStatus'
 import type { HeatNetworkApi } from '../shared/api/contracts'
@@ -29,8 +28,12 @@ function ActiveJob({ api, apiMode, initialJob, onReset }: ActiveJobProps) {
       <section className="workspace-panel" aria-label="Статус расчёта">
         <JobStatus job={job} isPollingError={query.isRefetchError} onReset={onReset} />
       </section>
-      <section className="map-placeholder" aria-label="Карта исходных данных">
-        <NetworkMap api={api} jobId={job.jobId} layer="input" />
+      <section className="map-placeholder" aria-label="Состояние карты">
+        <div className="map-grid" aria-hidden="true" />
+        <div className="map-empty-state">
+          <span className="map-pin" aria-hidden="true" />
+          <p>Карта будет доступна после успешного расчёта</p>
+        </div>
       </section>
     </main>
   )
