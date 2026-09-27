@@ -37,7 +37,7 @@ class JobApiTest {
         registry.add("heat-network.input.storage-directory", () -> temporary.resolve("datasets").toString());
     }
 
-    @Test void uploadReturns202AndLocationThenActualValidationState() throws Exception {
+    @Test void uploadCalculatesRealVariantsAndDownloadsMatchingGeoJson() throws Exception {
         byte[] fixture;
         try (InputStream input = getClass().getResourceAsStream("/fixtures/synthetic/two-consumers/input.geojson")) {
             assertNotNull(input);
@@ -54,8 +54,62 @@ class JobApiTest {
         String location = "/api/jobs/" + job.path("jobId").asText();
         assertEquals(location, accepted.getHeaders().getLocation().toString());
         JsonNode result = completed(location);
-        assertEquals("FAILED", result.path("status").asText());
-        assertEquals("PROCESSING_UNAVAILABLE", result.at("/diagnostics/0/code").asText());
+        assertEquals("SUCCEEDED", result.path("status").asText(), result.toString());
+        assertEquals("DONE", result.path("stage").asText());
+        ResponseEntity<JsonNode> variants = http.getForEntity(location + "/variants", JsonNode.class);
+        assertEquals(200, variants.getStatusCodeValue());
+        assertEquals("no-store", variants.getHeaders().getCacheControl());
+        assertEquals(1, variants.getBody().size(), "complete candidate replaces intermediate partial result");
+        assertEquals(0, variants.getBody().get(0).path("unconnected_oks_ids").size());
+        ResponseEntity<byte[]> download = http.getForEntity(location + "/result", byte[].class);
+        assertEquals(200, download.getStatusCodeValue());
+        assertEquals("application/geo+json", download.getHeaders().getContentType().toString());
+        assertTrue(download.getHeaders().getFirst("Content-Disposition").startsWith("attachment;"));
+        assertEquals(download.getBody().length, download.getHeaders().getContentLength());
+        JsonNode collection = mapper.readTree(download.getBody());
+        assertEquals("FeatureCollection", collection.path("type").asText());
+        int summaries = 0;
+        for (JsonNode feature : collection.path("features")) {
+            if ("variant_summary".equals(feature.at("/properties/object_type").asText())) {
+                JsonNode view = variants.getBody().get(summaries++);
+                JsonNode exported = feature.path("properties");
+                assertEquals(exported.size(), view.size());
+                exported.fields().forEachRemaining(field -> {
+                    JsonNode actual = view.path(field.getKey());
+                    if (field.getValue().isNumber()) assertEquals(0, field.getValue().decimalValue().compareTo(actual.decimalValue()), field.getKey());
+                    else assertEquals(field.getValue(), actual, field.getKey());
+                });
+            }
+        }
+        assertEquals(variants.getBody().size(), summaries);
+        String variantId = variants.getBody().get(0).path("variant_id").asText();
+        java.util.List<JsonNode> inputFeatures = mapPages(location + "/map?layer=input&bbox=-180,-90,180,90&limit=2");
+        java.util.List<JsonNode> expectedInput = new java.util.ArrayList<>();
+        mapper.readTree(fixture).path("features").forEach(expectedInput::add);
+        assertEquals(expectedInput, inputFeatures);
+        java.util.List<JsonNode> resultFeatures = mapPages(location + "/map?layer=result&variantId=" + variantId + "&bbox=-180,-90,180,90&limit=1");
+        java.util.List<JsonNode> expectedResult = new java.util.ArrayList<>();
+        collection.path("features").forEach(feature -> { if (!feature.path("geometry").isNull()) expectedResult.add(feature); });
+        assertEquals(expectedResult, resultFeatures);
+        ResponseEntity<JsonNode> bounds = http.getForEntity(location + "/map/bounds?variantId=" + variantId, JsonNode.class);
+        assertEquals(200, bounds.getStatusCodeValue());
+        assertEquals("no-store", bounds.getHeaders().getCacheControl());
+        assertEquals(1, bounds.getBody().size());
+        double[] expectedBounds = {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY};
+        for (JsonNode feature : expectedInput) extendBounds(expectedBounds, feature.path("geometry").path("coordinates"));
+        for (JsonNode feature : expectedResult) extendBounds(expectedBounds, feature.path("geometry").path("coordinates"));
+        for (int i = 0; i < 4; i++) assertEquals(expectedBounds[i], bounds.getBody().path("bbox").get(i).asDouble());
+        assertContract("/api/jobs/{jobId}/map/bounds", "get", "200", bounds.getBody());
+        assertError(404, "VARIANT_NOT_FOUND", http.getForEntity(location + "/map/bounds?variantId=absent", JsonNode.class));
+        assertError(400, "INVALID_VARIANT", http.getForEntity(location + "/map/bounds", JsonNode.class));
+        assertError(400, "INVALID_VARIANT", http.getForEntity(location + "/map/bounds?variantId=", JsonNode.class));
+        assertError(400, "INVALID_MAP_QUERY", http.getForEntity(location + "/map/bounds?variantId=a&variantId=b", JsonNode.class));
+        assertError(400, "INVALID_MAP_QUERY", http.getForEntity(location + "/map/bounds?variantId=a&bbox=0,0,1,1", JsonNode.class));
+        assertEquals(0, http.getForObject(location + "/map?layer=input&bbox=0,0,1,1", JsonNode.class).path("features").size());
+        assertError(404, "VARIANT_NOT_FOUND", http.getForEntity(location + "/map?layer=result&variantId=absent&bbox=0,0,1,1", JsonNode.class));
+        assertError(400, "INVALID_VARIANT", http.getForEntity(location + "/map?layer=result&bbox=0,0,1,1", JsonNode.class));
+        assertError(400, "INVALID_BBOX", http.getForEntity(location + "/map?layer=input&bbox=0,0,0,1", JsonNode.class));
+        assertError(400, "INVALID_MAP_QUERY", http.getForEntity(location + "/map?layer=input&bbox=0,0,1,1&limit=1&limit=2", JsonNode.class));
         assertEquals("no-store", http.getForEntity(location, JsonNode.class).getHeaders().getCacheControl());
         assertContract("/api/jobs", "post", "202", job);
         assertContract("/api/jobs/{jobId}", "get", "200", result);
@@ -66,6 +120,10 @@ class JobApiTest {
         assertEquals(202, accepted.getStatusCodeValue());
         JsonNode result = completed(accepted.getHeaders().getLocation().toString());
         assertEquals("INVALID_INPUT", result.at("/diagnostics/0/code").asText());
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/map/bounds?variantId=variant-1", JsonNode.class));
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/variants", JsonNode.class));
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/result", JsonNode.class));
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(accepted.getHeaders().getLocation() + "/map?layer=input&bbox=0,0,1,1", JsonNode.class));
         assertFalse(result.toString().contains(temporary.toString()));
         assertContract("/api/jobs/{jobId}", "get", "200", result);
     }
@@ -106,18 +164,62 @@ class JobApiTest {
         assertError(415, "INVALID_INPUT", http.postForEntity("/api/jobs", "text", JsonNode.class));
     }
 
-    @Test void liveSwaggerDescribesUploadAndStatusButNotPlannedMapAndResults() {
+    @Test void liveSwaggerDescribesResultsAndMap() {
         JsonNode spec = http.getForObject("/v3/api-docs", JsonNode.class);
         assertNotNull(spec);
         assertEquals("createJob", spec.at("/paths/~1api~1jobs/post/operationId").asText());
         assertTrue(spec.at("/paths/~1api~1jobs/post/responses").has("202"));
         assertTrue(spec.path("paths").has("/api/jobs/{jobId}"));
-        assertFalse(spec.path("paths").has("/api/jobs/{jobId}/map"));
+        assertEquals("listVariants", spec.at("/paths/~1api~1jobs~1{jobId}~1variants/get/operationId").asText());
+        assertEquals("downloadResult", spec.at("/paths/~1api~1jobs~1{jobId}~1result/get/operationId").asText());
+        assertEquals("getMapPage", spec.at("/paths/~1api~1jobs~1{jobId}~1map/get/operationId").asText());
+        assertEquals("getMapBounds", spec.at("/paths/~1api~1jobs~1{jobId}~1map~1bounds/get/operationId").asText());
+    }
+
+    @Test void missingResultsUseJson404ForBothEndpoints() {
+        for (String id : new String[] {UUID.randomUUID().toString(), "invalid-id"}) {
+            for (String endpoint : new String[] {"variants", "result", "map/bounds?variantId=variant-1"}) {
+                ResponseEntity<JsonNode> response = http.getForEntity("/api/jobs/" + id + "/" + endpoint, JsonNode.class);
+                assertError(404, "JOB_NOT_FOUND", response);
+                assertTrue(MediaType.APPLICATION_JSON.isCompatibleWith(response.getHeaders().getContentType()));
+            }
+        }
+    }
+
+    private static void extendBounds(double[] bounds, JsonNode coordinates) {
+        if (coordinates.size() >= 2 && coordinates.get(0).isNumber()) {
+            bounds[0] = Math.min(bounds[0], coordinates.get(0).asDouble());
+            bounds[1] = Math.min(bounds[1], coordinates.get(1).asDouble());
+            bounds[2] = Math.max(bounds[2], coordinates.get(0).asDouble());
+            bounds[3] = Math.max(bounds[3], coordinates.get(1).asDouble());
+        } else for (JsonNode child : coordinates) extendBounds(bounds, child);
     }
 
     private JsonNode completed(String location) {
-        eventually(() -> "FAILED".equals(http.getForObject(location, JsonNode.class).path("status").asText()));
+        eventually(() -> {
+            String status = http.getForObject(location, JsonNode.class).path("status").asText();
+            return "FAILED".equals(status) || "SUCCEEDED".equals(status);
+        });
         return http.getForObject(location, JsonNode.class);
+    }
+
+    private java.util.List<JsonNode> mapPages(String url) {
+        java.util.List<JsonNode> features = new java.util.ArrayList<>();
+        String cursor = null;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        do {
+            ResponseEntity<JsonNode> response = http.getForEntity(url + (cursor == null ? "" : "&cursor=" + cursor), JsonNode.class);
+            assertEquals(200, response.getStatusCodeValue(), () -> String.valueOf(response.getBody()));
+            assertEquals("application/geo+json", response.getHeaders().getContentType().toString());
+            assertEquals("no-store", response.getHeaders().getCacheControl());
+            JsonNode page = response.getBody();
+            assertEquals("FeatureCollection", page.path("type").asText());
+            assertTrue(page.has("nextCursor"));
+            page.path("features").forEach(features::add);
+            cursor = page.path("nextCursor").isNull() ? null : page.path("nextCursor").asText();
+            if (cursor != null) assertTrue(seen.add(cursor), "pagination must advance");
+        } while (cursor != null);
+        return features;
     }
 
     private ResponseEntity<JsonNode> upload(MultiValueMap<String, Object> body, String mode) {

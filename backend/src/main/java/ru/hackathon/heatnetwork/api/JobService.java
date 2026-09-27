@@ -24,11 +24,16 @@ import org.springframework.web.multipart.MultipartFile;
 import ru.hackathon.heatnetwork.input.InputParser;
 import ru.hackathon.heatnetwork.input.InvalidInputException;
 import ru.hackathon.heatnetwork.model.Dataset;
+import ru.hackathon.heatnetwork.model.Model.CalculatedVariant;
+import ru.hackathon.heatnetwork.output.ResultExporter;
+import ru.hackathon.heatnetwork.output.OutputLimitExceededException;
 
 @Service
 public final class JobService implements DisposableBean {
     private static final Logger LOG = LoggerFactory.getLogger(JobService.class);
     private final InputParser parser;
+    private final CalculationCoordinator coordinator;
+    private final ResultExporter exporter;
     private final JobProperties properties;
     private final FileJobStore store;
     private final ThreadPoolExecutor workers;
@@ -38,8 +43,11 @@ public final class JobService implements DisposableBean {
     private final ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock();
     private boolean stopping;
 
-    public JobService(InputParser parser, ObjectMapper mapper, JobProperties properties) throws IOException {
+    public JobService(InputParser parser, ObjectMapper mapper, JobProperties properties,
+                      CalculationCoordinator coordinator, ResultExporter exporter) throws IOException {
         this.parser = parser;
+        this.coordinator = coordinator;
+        this.exporter = exporter;
         this.properties = properties;
         if (properties.getRetention().isNegative() || properties.getRetention().isZero()) {
             throw new IllegalArgumentException("Job retention must be positive");
@@ -95,6 +103,34 @@ public final class JobService implements DisposableBean {
         try { return store.get(id); } catch (NoSuchFileException exception) { throw notFound(); }
     }
 
+    public List<VariantSummaryView> variants(String id) throws IOException { return store.variants(id); }
+    FileJobStore.Download download(String id) throws IOException { return store.download(id); }
+
+    MapArchive.Page map(String id, MapQuery query) throws IOException {
+        int variant = store.mapVariant(id, query);
+        MapArchive.Reader archive = store.openMap(id, query);
+        try { return archive.select(query, variant); }
+        catch (IOException | RuntimeException exception) {
+            try { archive.close(); } catch (IOException closing) { exception.addSuppressed(closing); }
+            throw exception;
+        }
+    }
+
+    MapBoundsView bounds(String id, String variantId) throws IOException {
+        if (variantId == null || variantId.isBlank()) throw MapQuery.bad("INVALID_VARIANT", "Укажите variantId.");
+        int variant = store.mapVariant(id, variantId);
+        try (MapArchive.Reader input = store.openMap(id, "input");
+             MapArchive.Reader result = store.openMap(id, "result")) {
+            double[] a = input.bounds(0), b = result.bounds(variant);
+            if (a == null) return new MapBoundsView(b);
+            if (b != null) {
+                a[0] = Math.min(a[0], b[0]); a[1] = Math.min(a[1], b[1]);
+                a[2] = Math.max(a[2], b[2]); a[3] = Math.max(a[3], b[3]);
+            }
+            return new MapBoundsView(a);
+        }
+    }
+
     private void copyUpload(MultipartFile file, String id) throws IOException {
         // The original filename never participates in path construction.
         try (InputStream input = file.getInputStream();
@@ -121,11 +157,19 @@ public final class JobService implements DisposableBean {
             try {
                 store.save(job.validating());
                 try (Dataset dataset = parser.parse(store.input(job.jobId))) {
-                    // Next integration step: pass this Dataset to the routing/calculation/export
-                    // coordinator. Validation alone must never produce SUCCEEDED or fake variants.
-                    terminal = job.failed(List.of(new ApiError("PROCESSING_UNAVAILABLE",
-                            "Файл прошёл проверку. Расчёт маршрутов пока недоступен; повторите загрузку после его подключения.")));
+                    List<CalculatedVariant> variants = coordinator.calculate(dataset, stage -> store.save(job.running(stage)));
+                    store.save(job.running(JobView.Stage.EXPORTING));
+                    store.writeResult(job.jobId, dataset, variants, exporter);
+                    store.writeMaps(job.jobId);
+                    CalculationCoordinator.interrupted();
+                    int missing = variants.get(0).unconnectedPointIds.size();
+                    terminal = job.succeeded(missing == 0 ? List.of() : List.of(new ApiError("ROUTE_NOT_FOUND",
+                            "В лучшем варианте не подключено точек: " + missing + ". Поиск завершён в пределах заданного бюджета.")));
                 }
+            } catch (CalculationCoordinator.NoValidVariantException exception) {
+                terminal = job.failed(exception.diagnostics);
+            } catch (OutputLimitExceededException exception) {
+                terminal = job.failed(List.of(new ApiError("OUTPUT_LIMIT_EXCEEDED", exception.getMessage())));
             } catch (InvalidInputException exception) {
                 terminal = job.failed(exception.getDiagnostics().stream().map(ApiError::from).collect(Collectors.toList()));
             } catch (Exception exception) {
@@ -149,6 +193,10 @@ public final class JobService implements DisposableBean {
             try {
                 try { store.removeInput(job.jobId); }
                 catch (IOException exception) { LOG.error("Cannot remove input for job {}", job.jobId, exception); }
+                if (terminal.status != JobView.Status.SUCCEEDED) {
+                    try { store.removeResult(job.jobId); }
+                    catch (IOException exception) { LOG.error("Cannot remove result for job {}", job.jobId, exception); }
+                }
                 store.save(terminal);
             } catch (IOException exception) {
                 LOG.error("Cannot persist terminal state for job {}", job.jobId, exception);

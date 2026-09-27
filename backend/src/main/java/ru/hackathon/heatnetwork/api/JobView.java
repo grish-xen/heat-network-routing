@@ -29,6 +29,8 @@ public final class JobView {
     }
 
     JobView validating() { return new JobView(jobId, Status.RUNNING, Stage.VALIDATING, mode, List.of()); }
+    JobView running(Stage stage) { return new JobView(jobId, Status.RUNNING, stage, mode, List.of()); }
+    JobView succeeded(List<ApiError> diagnostics) { return new JobView(jobId, Status.SUCCEEDED, Stage.DONE, mode, diagnostics); }
     JobView failed(List<ApiError> errors) { return new JobView(jobId, Status.FAILED, Stage.FAILED, mode, errors); }
     boolean terminal() { return status == Status.FAILED || status == Status.SUCCEEDED; }
 }

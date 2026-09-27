@@ -23,6 +23,13 @@ import ru.hackathon.heatnetwork.input.InvalidInputException;
 import ru.hackathon.heatnetwork.model.Dataset;
 import ru.hackathon.heatnetwork.model.Model.Diagnostic;
 import ru.hackathon.heatnetwork.model.ObjectId;
+import ru.hackathon.heatnetwork.routing.RoutePlanner;
+import ru.hackathon.heatnetwork.routing.RulesCatalog;
+import ru.hackathon.heatnetwork.routing.GridRoutePlannerFactory;
+import ru.hackathon.heatnetwork.routing.DefaultSpatialValidator;
+import ru.hackathon.heatnetwork.calculation.DefaultVariantCalculator;
+import ru.hackathon.heatnetwork.output.GeoJsonResultExporter;
+import java.util.Optional;
 import static ru.hackathon.heatnetwork.api.TestPolling.eventually;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -44,7 +51,7 @@ class JobServiceTest {
         JobProperties properties = properties();
         properties.setWorkers(1);
         properties.setQueueCapacity(1);
-        JobService jobs = new JobService(parser, mapper, properties);
+        JobService jobs = noRoutes(parser, properties);
         try {
             JobView first = jobs.submit(upload(), "2d");
             assertEquals(JobView.Status.QUEUED, first.status);
@@ -58,15 +65,17 @@ class JobServiceTest {
             terminal(jobs, first.jobId);
             terminal(jobs, second.jobId);
             JobView third = jobs.submit(upload(), "2d");
-            assertEquals("PROCESSING_UNAVAILABLE", terminal(jobs, third.jobId).diagnostics.get(0).code);
+            assertEquals("ROUTE_NOT_FOUND", terminal(jobs, third.jobId).diagnostics.get(0).code);
             verify(dataset, times(3)).close();
             assertEquals(0, countInputs());
         } finally { release.countDown(); jobs.destroy(); }
     }
 
-    @Test void actualParserClosesDatasetAndDoesNotClaimCalculatedSuccess() throws Exception {
+    @Test void actualPipelineClosesDatasetAndKeepsDownloadAfterRestart() throws Exception {
         Path datasets = temporary.resolve("datasets");
-        JobService jobs = new JobService(new GeoJsonInputParser(datasets), mapper, properties());
+        JobService jobs = realPipeline(new GeoJsonInputParser(datasets), properties());
+        String jobId;
+        byte[] originalResult;
         try {
             byte[] bytes;
             try (InputStream input = getClass().getResourceAsStream("/fixtures/synthetic/two-consumers/input.geojson")) {
@@ -75,18 +84,31 @@ class JobServiceTest {
             }
             JobView created = jobs.submit(new MockMultipartFile("file", "../../outside.json", "application/json", bytes), "2d");
             JobView result = terminal(jobs, created.jobId);
-            assertEquals(JobView.Status.FAILED, result.status);
-            assertEquals("PROCESSING_UNAVAILABLE", result.diagnostics.get(0).code);
+            jobId = result.jobId;
+            assertEquals(JobView.Status.SUCCEEDED, result.status);
+            assertEquals(1, jobs.variants(jobId).size(), "partial intermediate candidate must be discarded");
+            try (InputStream download = jobs.download(jobId).stream) { originalResult = download.readAllBytes(); }
             try (Stream<Path> files = Files.list(datasets)) { assertEquals(0, files.count()); }
             assertEquals(0, countInputs());
         } finally { jobs.destroy(); }
+        JobService restarted = realPipeline(new GeoJsonInputParser(datasets), properties());
+        try {
+            assertEquals(JobView.Status.SUCCEEDED, restarted.get(jobId).status);
+            assertEquals(1, restarted.variants(jobId).size());
+            try (InputStream download = restarted.download(jobId).stream) { assertArrayEquals(originalResult, download.readAllBytes()); }
+            try (MapArchive.Page page = restarted.map(jobId, new MapQuery(jobId, "input", "-180,-90,180,90", null, null, null))) {
+                java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+                page.writeTo(output);
+                assertEquals(5, mapper.readTree(output.toByteArray()).path("features").size());
+            }
+        } finally { restarted.destroy(); }
     }
 
     @Test void diagnosticObjectIdsKeepTheirExactNumberOrStringTypesAcrossDiskRoundTrip() throws Exception {
         BigDecimal number = new BigDecimal("12345678901234567890.1234567890123456789");
         Diagnostic numeric = diagnostic(new ObjectId(com.fasterxml.jackson.databind.node.DecimalNode.valueOf(number)));
         Diagnostic string = diagnostic(new ObjectId(com.fasterxml.jackson.databind.node.TextNode.valueOf(number.toPlainString())));
-        JobService jobs = new JobService(path -> { throw new InvalidInputException(List.of(numeric, string)); }, mapper, properties());
+        JobService jobs = noRoutes(path -> { throw new InvalidInputException(List.of(numeric, string)); }, properties());
         try {
             JobView view = terminal(jobs, jobs.submit(upload(), "2d").jobId);
             assertEquals(number, view.diagnostics.get(0).details.get(0).get("inputObjectId"));
@@ -99,7 +121,7 @@ class JobServiceTest {
         properties.setWorkers(1);
         properties.setQueueCapacity(0);
         properties.setMaxFileBytes(4);
-        JobService jobs = new JobService(path -> { throw new IOException("PRIVATE server path"); }, mapper, properties);
+        JobService jobs = noRoutes(path -> { throw new IOException("PRIVATE server path"); }, properties);
         try {
             MockMultipartFile misleading = new MockMultipartFile("file", new byte[5]) {
                 @Override public long getSize() { return 1; }
@@ -128,7 +150,7 @@ class JobServiceTest {
         };
         JobProperties properties = properties();
         properties.setWorkers(1);
-        JobService jobs = new JobService(blocked, mapper, properties);
+        JobService jobs = noRoutes(blocked, properties);
         String running;
         String queued;
         try {
@@ -136,7 +158,7 @@ class JobServiceTest {
             assertTrue(started.await(5, TimeUnit.SECONDS));
             queued = jobs.submit(upload(), "2d").jobId;
         } finally { jobs.destroy(); }
-        JobService restarted = new JobService(blocked, mapper, properties);
+        JobService restarted = noRoutes(blocked, properties);
         try {
             assertEquals("JOB_INTERRUPTED", restarted.get(running).diagnostics.get(0).code);
             assertEquals("JOB_INTERRUPTED", restarted.get(queued).diagnostics.get(0).code);
@@ -174,6 +196,55 @@ class JobServiceTest {
         return properties;
     }
 
+    @Test void exportFailureClosesDatasetAndCannotLeaveAnAccessibleResult() throws Exception {
+        Dataset dataset = mock(Dataset.class);
+        RoutePlanner.SearchSession session = mock(RoutePlanner.SearchSession.class);
+        ru.hackathon.heatnetwork.model.Model.RouteCandidate candidate = new ru.hackathon.heatnetwork.model.Model.RouteCandidate();
+        candidate.candidateId = "test";
+        when(session.next()).thenReturn(Optional.of(candidate), Optional.empty());
+        ru.hackathon.heatnetwork.model.Model.CalculatedVariant variant = new ru.hackathon.heatnetwork.model.Model.CalculatedVariant();
+        variant.summary = new ru.hackathon.heatnetwork.model.Model.Summary();
+        variant.summary.score = BigDecimal.ONE;
+        ru.hackathon.heatnetwork.model.Model.Evaluation evaluation = new ru.hackathon.heatnetwork.model.Model.Evaluation();
+        evaluation.variant = variant;
+        JobProperties properties = properties();
+        JobService jobs = new JobService(path -> dataset, mapper, properties,
+                new CalculationCoordinator((d, o) -> session, (d, c, m) -> evaluation, properties),
+                (d, variants, output) -> {
+                    output.write(123);
+                    throw new ru.hackathon.heatnetwork.output.OutputLimitExceededException(1);
+                });
+        try {
+            JobView failed = terminal(jobs, jobs.submit(upload(), "2d").jobId);
+            assertEquals(JobView.Status.FAILED, failed.status);
+            assertEquals("OUTPUT_LIMIT_EXCEEDED", failed.diagnostics.get(0).code);
+            assertEquals(409, assertThrows(ApiException.class, () -> jobs.download(failed.jobId)).status);
+            assertEquals(0, countInputs());
+            assertFalse(Files.exists(properties.getStorageDirectory().resolve(failed.jobId + ".result.geojson.tmp")));
+            verify(dataset).close();
+            verify(session).close();
+        } finally { jobs.destroy(); }
+    }
+
+    private JobService noRoutes(InputParser parser, JobProperties properties) throws IOException {
+        RoutePlanner planner = (dataset, options) -> {
+            RoutePlanner.SearchSession session = mock(RoutePlanner.SearchSession.class);
+            when(session.next()).thenReturn(Optional.empty());
+            return session;
+        };
+        return new JobService(parser, mapper, properties,
+                new CalculationCoordinator(planner, (d, c, m) -> { throw new AssertionError("No candidates expected"); }, properties),
+                new GeoJsonResultExporter());
+    }
+
+    private JobService realPipeline(InputParser parser, JobProperties properties) throws IOException {
+        RulesCatalog rules = RulesCatalog.loadDefault();
+        return new JobService(parser, mapper, properties,
+                new CalculationCoordinator(new GridRoutePlannerFactory(rules),
+                        new DefaultVariantCalculator(rules, new DefaultSpatialValidator(rules)), properties),
+                new GeoJsonResultExporter());
+    }
+
     private MockMultipartFile upload() { return new MockMultipartFile("file", "input.geojson", "application/geo+json", new byte[] {1, 2}); }
     private JobView queued(String id) { return new JobView(id, JobView.Status.QUEUED, JobView.Stage.QUEUED, "2d", List.of()); }
     private Diagnostic diagnostic(ObjectId id) {
@@ -189,7 +260,7 @@ class JobServiceTest {
     }
     private long countInputs() throws IOException {
         try (Stream<Path> files = Files.list(properties().getStorageDirectory())) {
-            return files.filter(path -> path.toString().endsWith(".geojson")).count();
+            return files.filter(path -> path.toString().endsWith(".geojson") && !path.toString().endsWith(".result.geojson")).count();
         }
     }
 }
