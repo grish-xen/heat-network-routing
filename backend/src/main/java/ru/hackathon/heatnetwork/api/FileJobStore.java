@@ -77,8 +77,7 @@ final class FileJobStore implements AutoCloseable {
     }
 
     private static void publish(Path temporary, Path target) throws IOException {
-        try { Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
-        catch (AtomicMoveNotSupportedException exception) { Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING); }
+        FilePublication.publish(temporary, target);
     }
 
     void writeMaps(String id) throws IOException {
@@ -187,11 +186,7 @@ final class FileJobStore implements AutoCloseable {
             stored.job = job;
             stored.updatedAt = Instant.now();
             mapper.writeValue(temporary.toFile(), stored);
-            try {
-                Files.move(temporary, path(job.jobId, ".json"), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException exception) {
-                Files.move(temporary, path(job.jobId, ".json"), StandardCopyOption.REPLACE_EXISTING);
-            }
+            publish(temporary, path(job.jobId, ".json"));
         } finally {
             Files.deleteIfExists(temporary);
         }
