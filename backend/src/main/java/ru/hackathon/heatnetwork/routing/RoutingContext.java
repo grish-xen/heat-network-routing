@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
@@ -122,6 +123,11 @@ public final class RoutingContext {
         return Collections.unmodifiableList(targets);
     }
 
+    /** Shared geometry factory (EPSG:32637 metric coordinates). */
+    public GeometryFactory geometryFactory() {
+        return gf;
+    }
+
     /**
      * Builds the context. {@code searchWidthMm} — the diameter used to size obstacle
      * buffers during search; the branch-specific diameter is checked exactly later.
@@ -180,13 +186,24 @@ public final class RoutingContext {
     }
 
     /** True when the segment is blocked by a non-exempt forbidden obstacle or crosses a non-exempt OKS polygon. */
-    public boolean blockedByForbidden(Coordinate a, Coordinate b, ObjectId exemptOksPolygonId) {
+    public boolean blockedByForbidden(Coordinate a, Coordinate b, ObjectId exemptOksPolygonId, Set<ObjectId> exemptLineIds) {
+        // Cheap bbox pre-filter: segment envelope (grown by max buffer) vs obstacle envelope.
+        double pad = 20.0;
+        double minX = Math.min(a.x, b.x) - pad, maxX = Math.max(a.x, b.x) + pad;
+        double minY = Math.min(a.y, b.y) - pad, maxY = Math.max(a.y, b.y) + pad;
         LineString segment = gf.createLineString(new Coordinate[] {a, b});
         for (Obstacle obstacle : obstacles) {
             if (!obstacle.forbidden) {
                 continue;
             }
             if (exemptOksPolygonId != null && obstacle.id.equals(exemptOksPolygonId)) {
+                continue;
+            }
+            if (exemptLineIds != null && exemptLineIds.contains(obstacle.id)) {
+                continue;
+            }
+            Envelope oe = obstacle.buffered.getEnvelopeInternal();
+            if (oe.getMaxX() < minX || oe.getMinX() > maxX || oe.getMaxY() < minY || oe.getMinY() > maxY) {
                 continue;
             }
             if (obstacle.buffered.intersects(segment)) {
@@ -201,6 +218,13 @@ public final class RoutingContext {
             if (exemptOksPolygonId != null && obstacle.id.equals(exemptOksPolygonId)) {
                 continue;
             }
+            if (exemptLineIds != null && exemptLineIds.contains(obstacle.id)) {
+                continue;
+            }
+            Envelope oe = obstacle.exact.getEnvelopeInternal();
+            if (oe.getMaxX() < minX || oe.getMinX() > maxX || oe.getMaxY() < minY || oe.getMinY() > maxY) {
+                continue;
+            }
             if (obstacle.exact.intersects(segment)) {
                 return true;
             }
@@ -212,11 +236,22 @@ public final class RoutingContext {
     }
 
     /** Restricted clearance-zone hit for a segment with a specific diameter (special passes allowed, clearance still applies). */
-    public boolean violatesSpecialClearance(Coordinate a, Coordinate b, int diameterMm, ObjectId exemptOksPolygonId) {
+    public boolean violatesSpecialClearance(Coordinate a, Coordinate b, int diameterMm, ObjectId exemptOksPolygonId, Set<ObjectId> exemptLineIds) {
+        // Cheap bbox pre-filter before exact geometry work.
+        double pad = 30.0;
+        double minX = Math.min(a.x, b.x) - pad, maxX = Math.max(a.x, b.x) + pad;
+        double minY = Math.min(a.y, b.y) - pad, maxY = Math.max(a.y, b.y) + pad;
         LineString segment = gf.createLineString(new Coordinate[] {a, b});
         double halfWidth = catalog.halfWidthM(diameterMm);
         for (Obstacle obstacle : obstacles) {
             if (exemptOksPolygonId != null && obstacle.id.equals(exemptOksPolygonId)) {
+                continue;
+            }
+            if (exemptLineIds != null && exemptLineIds.contains(obstacle.id)) {
+                continue;
+            }
+            Envelope oe = obstacle.exact.getEnvelopeInternal();
+            if (oe.getMaxX() < minX || oe.getMinX() > maxX || oe.getMaxY() < minY || oe.getMinY() > maxY) {
                 continue;
             }
             double clearance = catalog.clearanceFor(obstacle.restrictionType, diameterMm);
