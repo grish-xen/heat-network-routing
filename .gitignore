@@ -25,3 +25,6 @@ results/
 
 # Portable local tooling (if a participant downloads it into the repository)
 .build-tools/
+
+# Local Git worktrees
+.worktrees/
