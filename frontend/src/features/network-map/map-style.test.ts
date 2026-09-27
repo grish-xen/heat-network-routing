@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { mapFeatureId, MAP_LAYER_DEFINITIONS, MAP_LEGEND_ITEMS } from './map-style'
+import { mapFeatureId, mapSourceFeatureId, MAP_LAYER_DEFINITIONS, MAP_LEGEND_ITEMS } from './map-style'
 
 describe('map style definitions', () => {
   it('gives every supported object type a visible layer treatment', () => {
@@ -29,5 +29,15 @@ describe('map style definitions', () => {
   it('uses exact ID kind and value for GeoJSON feature IDs', () => {
     expect(mapFeatureId({ kind: 'number', value: '9007199254740993' })).toBe('number:9007199254740993')
     expect(mapFeatureId({ kind: 'string', value: '9007199254740993' })).toBe('string:9007199254740993')
+  })
+
+  it('keeps input and calculated features distinct when their source IDs coincide', () => {
+    const id = { kind: 'number' as const, value: '9007199254740993' }
+    expect(mapSourceFeatureId({ id, objectType: 'heat_network' })).toBe('input:heat_network:number:9007199254740993')
+    expect(mapSourceFeatureId({
+      id,
+      objectType: 'heat_network',
+      variantId: { kind: 'string', value: 'variant-1' },
+    })).toBe('result:string:variant-1:number:9007199254740993')
   })
 })

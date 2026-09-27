@@ -14,7 +14,12 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import type { MapPage } from '../../shared/model/api'
 import { objectIdKey } from '../../shared/model/object-id'
 import type { ViewportBbox } from './map-query'
-import { MAP_LAYER_DEFINITIONS, type LayerGroup, type MapLayerDefinition } from './map-style'
+import {
+  mapSourceFeatureId,
+  MAP_LAYER_DEFINITIONS,
+  type LayerGroup,
+  type MapLayerDefinition,
+} from './map-style'
 
 setWorkerUrl(workerUrl)
 
@@ -55,7 +60,7 @@ function toGeoJson(page: MapPage) {
     type: 'FeatureCollection' as const,
     features: page.features.map((feature) => ({
       type: 'Feature' as const,
-      id: objectIdKey(feature.properties.id),
+      id: mapSourceFeatureId(feature.properties),
       geometry: feature.geometry,
       properties: {
         id: objectIdKey(feature.properties.id),

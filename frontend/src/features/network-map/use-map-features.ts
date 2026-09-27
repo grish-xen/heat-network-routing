@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
 import type { MapPage, MapQuery } from '../../shared/model/api'
@@ -42,5 +42,19 @@ export function useMapFeatures(api: HeatNetworkApi, jobId: string, query: MapQue
     queryKey: mapQueryKey(jobId, query),
     queryFn: ({ signal }) => loadMapFeatures(api, jobId, query, signal),
     placeholderData: (previous) => previous,
+  })
+}
+
+export function useMapFeatureCollections(
+  api: HeatNetworkApi,
+  jobId: string,
+  queries: readonly MapQuery[],
+) {
+  return useQueries({
+    queries: queries.map((query) => ({
+      queryKey: mapQueryKey(jobId, query),
+      queryFn: ({ signal }: { signal: AbortSignal }) => loadMapFeatures(api, jobId, query, signal),
+      placeholderData: (previous: MapPage | undefined) => previous,
+    })),
   })
 }

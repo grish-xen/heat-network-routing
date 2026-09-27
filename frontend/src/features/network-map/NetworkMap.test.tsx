@@ -38,12 +38,26 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('NetworkMap', () => {
-  it('creates one adapter, publishes query data, and destroys it on unmount', async () => {
+  it('creates one adapter, loads each layer independently, publishes their data, and destroys it on unmount', async () => {
     const api = createApi()
-    const { rerender, unmount } = renderMap(<NetworkMap api={api} jobId="job-1" layer="input" />)
+    const layers = [
+      { layer: 'input' as const },
+      { layer: 'result' as const, variantId: { kind: 'string' as const, value: 'variant-1' } },
+    ]
+    const { rerender, unmount } = renderMap(<NetworkMap api={api} jobId="job-1" layers={layers} />)
 
     await waitFor(() => expect(mapMock.adapter.setFeatureCollection).toHaveBeenCalled())
-    rerender(<QueryClientProvider client={new QueryClient()}><NetworkMap api={api} jobId="job-1" layer="input" /></QueryClientProvider>)
+    expect(api.getMapPage).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ layer: 'input', variantId: undefined }),
+      expect.any(AbortSignal),
+    )
+    expect(api.getMapPage).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ layer: 'result', variantId: { kind: 'string', value: 'variant-1' } }),
+      expect.any(AbortSignal),
+    )
+    rerender(<QueryClientProvider client={new QueryClient()}><NetworkMap api={api} jobId="job-1" layers={layers} /></QueryClientProvider>)
     expect(mapMock.create).toHaveBeenCalledTimes(1)
     unmount()
     expect(mapMock.adapter.destroy).toHaveBeenCalledTimes(1)
@@ -52,7 +66,7 @@ describe('NetworkMap', () => {
   it('debounces viewport changes reported by the adapter', () => {
     vi.useFakeTimers()
     const onViewportChange = vi.fn()
-    renderMap(<NetworkMap api={createApi()} jobId="job-1" layer="input" onViewportChange={onViewportChange} />)
+    renderMap(<NetworkMap api={createApi()} jobId="job-1" layers={[{ layer: 'input' }]} onViewportChange={onViewportChange} />)
     const emitViewport = mapMock.create.mock.calls[0]?.[1]
     const bbox = { minLon: 37.41, minLat: 55.66, maxLon: 37.42, maxLat: 55.67 }
 

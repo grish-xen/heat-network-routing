@@ -54,8 +54,10 @@ export function ResultWorkspace({ api, jobId, demo = false, onReset }: ResultWor
         <NetworkMap
           api={api}
           jobId={jobId}
-          layer="result"
-          variantId={selected.variantId}
+          layers={[
+            { layer: 'input' },
+            { layer: 'result', variantId: selected.variantId },
+          ]}
           onUnavailable={(reason) => {
             if (reason === 'GPU_UNAVAILABLE') setMapUnavailable(true)
           }}

@@ -41,14 +41,19 @@ function renderWorkspace() {
 beforeEach(() => { mapMock.unavailable = false; mapMock.render.mockReset() })
 
 describe('ResultWorkspace', () => {
-  it('selects the lowest server rank and passes the exact selected ID to the map', async () => {
+  it('selects the lowest server rank and passes the exact selected ID with the input layer to the map', async () => {
     const user = userEvent.setup()
     renderWorkspace()
     const first = await screen.findByRole('radio', { name: /вариант 1/i })
     expect(first).toBeChecked()
     await user.click(screen.getByRole('radio', { name: /вариант 2/i }))
     await waitFor(() => expect(mapMock.render).toHaveBeenLastCalledWith(
-      expect.objectContaining({ variantId: { kind: 'string', value: 'v2' } }),
+      expect.objectContaining({
+        layers: [
+          { layer: 'input' },
+          { layer: 'result', variantId: { kind: 'string', value: 'v2' } },
+        ],
+      }),
     ))
   })
 
