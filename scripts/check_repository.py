@@ -72,6 +72,10 @@ try:
     require([c['costRub'] for c in catalog['chambers']] == [number(row[1]) for row in rows(tables[2])[1:]], 'Chamber costs differ from DOCX')
 
     competition = input_check('test-data/competition-corrected.geojson')
+    from check_depth_contract import check_depth
+    check_depth()
+    for fixture in (ROOT / 'test-data/synthetic/depth').glob('*/input.geojson'):
+        input_check(fixture.relative_to(ROOT))
     toy = input_check('test-data/synthetic/two-consumers/input.geojson')
     case = read('test-data/synthetic/two-consumers/metric-case.json')
     expected = read('test-data/synthetic/two-consumers/expected.geojson')
@@ -118,7 +122,7 @@ try:
     require(api['openapi'] == '3.0.3', 'OpenAPI version')
     require(read('test-data/api/variants.json') == [summary], 'API fixture drift')
     job_schema = api['components']['schemas']['Job']
-    for path in (ROOT / 'test-data/api').glob('job-*.json'):
+    for path in (ROOT / 'test-data/api').rglob('job-*.json'):
         job = json.loads(path.read_text(encoding='utf-8'))
         require(all(field in job for field in job_schema['required']), f'Missing Job field: {path.name}')
         for field in ('status', 'stage', 'mode'):

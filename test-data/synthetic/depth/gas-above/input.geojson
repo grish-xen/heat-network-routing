@@ -1,0 +1,90 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "source",
+        "object_type": "source"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.44198302128581,
+          55.666829315677724
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "existing-line",
+        "object_type": "heat_network",
+        "diameter": 300
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.44198302128581,
+            55.666829315677724
+          ],
+          [
+            37.44194732728845,
+            55.66772752663389
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "existing-chamber",
+        "object_type": "heat_chamber"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.44194732728845,
+          55.66772752663389
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1,
+        "object_type": "oks_connection_point",
+        "flow_tph": 10
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.44353651862738,
+          55.667747691178576
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "crossing",
+        "object_type": "restriction",
+        "restriction_type": "gas_pipeline"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.44275262566107,
+            55.66746814810466
+          ],
+          [
+            37.442731219569225,
+            55.66800707483659
+          ]
+        ]
+      }
+    }
+  ]
+}

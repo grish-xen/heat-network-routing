@@ -1,0 +1,134 @@
+{
+  "version": "depth-contract-1",
+  "sourceSha256": "c757f68dcf58f23abd18cb9217cd65107102bd53653a7485041d4363e54b71d6",
+  "depthReference": "top_of_design_envelope",
+  "positiveDirection": "down",
+  "surface": "horizontal",
+  "metricSrid": 32637,
+  "geoJsonSrid": 4326,
+  "ordinaryDepthM": 3.0,
+  "minimumDepthM": 0.7,
+  "maximumSlope": 0.1,
+  "diameters": [
+    {
+      "diameterMm": 50,
+      "widthM": 0.4,
+      "heightM": 0.125
+    },
+    {
+      "diameterMm": 65,
+      "widthM": 0.43,
+      "heightM": 0.14
+    },
+    {
+      "diameterMm": 80,
+      "widthM": 0.47,
+      "heightM": 0.16
+    },
+    {
+      "diameterMm": 100,
+      "widthM": 0.51,
+      "heightM": 0.18
+    },
+    {
+      "diameterMm": 125,
+      "widthM": 0.6,
+      "heightM": 0.225
+    },
+    {
+      "diameterMm": 150,
+      "widthM": 0.65,
+      "heightM": 0.25
+    },
+    {
+      "diameterMm": 200,
+      "widthM": 0.88,
+      "heightM": 0.315
+    },
+    {
+      "diameterMm": 250,
+      "widthM": 1.05,
+      "heightM": 0.4
+    },
+    {
+      "diameterMm": 300,
+      "widthM": 1.15,
+      "heightM": 0.45
+    },
+    {
+      "diameterMm": 400,
+      "widthM": 1.37,
+      "heightM": 0.56
+    },
+    {
+      "diameterMm": 500,
+      "widthM": 1.67,
+      "heightM": 0.71
+    },
+    {
+      "diameterMm": 600,
+      "widthM": 1.85,
+      "heightM": 0.8
+    },
+    {
+      "diameterMm": 700,
+      "widthM": 2.05,
+      "heightM": 0.9
+    },
+    {
+      "diameterMm": 800,
+      "widthM": 2.25,
+      "heightM": 1
+    },
+    {
+      "diameterMm": 900,
+      "widthM": 2.45,
+      "heightM": 1.1
+    },
+    {
+      "diameterMm": 1000,
+      "widthM": 2.65,
+      "heightM": 1.2
+    },
+    {
+      "diameterMm": 1200,
+      "widthM": 3.1,
+      "heightM": 1.425
+    },
+    {
+      "diameterMm": 1400,
+      "widthM": 3.45,
+      "heightM": 1.6
+    }
+  ],
+  "crossings": [
+    {
+      "type": "road",
+      "minimumNewTopDepthM": 1.0
+    },
+    {
+      "type": "tram_tracks",
+      "minimumNewTopDepthM": 1.2
+    },
+    {
+      "type": "gas_pipeline",
+      "existingTopDepthM": 2.8,
+      "profileWidthM": 0.4,
+      "profileHeightM": 0.4,
+      "minimumVerticalClearanceM": 0.2
+    },
+    {
+      "type": "power_cable",
+      "existingTopDepthM": 2.7,
+      "profileWidthM": 0.2,
+      "profileHeightM": 0.2,
+      "minimumVerticalClearanceM": 0.5
+    },
+    {
+      "type": "heat_network",
+      "existingTopDepthM": 3.0,
+      "profileDimensionsFrom": "catalog-v1.diameters",
+      "minimumVerticalClearanceM": 0.5
+    }
+  ]
+}

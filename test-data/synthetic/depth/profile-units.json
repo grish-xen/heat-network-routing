@@ -1,0 +1,20 @@
+{
+  "version": "depth-contract-1",
+  "scope": "Profile/cost unit examples, not whole networks; endpoint policy does not apply to an isolated piece.",
+  "costCases": [
+    { "id": "ordinary", "diameterMm": 80, "lengthM": 10, "depthStartM": 3, "depthEndM": 3, "specialCoefficient": 1, "expectedSplitAtM": [], "expectedCostRub": 835300 },
+    { "id": "descending", "diameterMm": 80, "lengthM": 4, "depthStartM": 3, "depthEndM": 3.4, "specialCoefficient": 1, "expectedSplitAtM": [], "expectedCostRub": 340802.4 },
+    { "id": "crossing-three-metres", "diameterMm": 80, "lengthM": 20, "depthStartM": 2, "depthEndM": 4, "specialCoefficient": 1, "expectedSplitAtM": [10], "expectedCostRub": 1712365 },
+    { "id": "deep-special", "diameterMm": 80, "lengthM": 4, "depthStartM": 3.4, "depthEndM": 3.4, "specialCoefficient": 1.25, "expectedSplitAtM": [], "expectedCostRub": 434356 }
+  ],
+  "interpolationCase": {
+    "xy": [[0,0], [10,0], [100,0]], "depthStartM": 3, "depthEndM": 4,
+    "expectedVertexDepthsM": [3,3.1,4],
+    "reversedExpectedVertexDepthsM": [4,3.1,3]
+  },
+  "insufficientTransition": {
+    "scope": "Feasibility of this fixed profile interval only; the complete routing problem may have alternatives.",
+    "availableLengthM": 3, "depthStartM": 3, "requiredEndDepthM": 3.4,
+    "minimumRequiredLengthM": 4, "expectedCode": "DEPTH_PROFILE_NOT_FOUND"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-edge-1",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "existing-chamber",
+        "end_node_id": 1,
+        "flow_tph": 10,
+        "diameter": 80,
+        "length": 100.0,
+        "laying_method": "base",
+        "depth_start": 3,
+        "depth_end": 3,
+        "cost": 8353000.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.41023676760975,
+            55.66552352171758
+          ],
+          [
+            37.41063403688381,
+            55.66552866727571
+          ],
+          [
+            37.41182584547744,
+            55.66554409623801
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-summary",
+        "object_type": "variant_summary",
+        "variant_id": "variant-1",
+        "rank": 1,
+        "unconnected_oks_ids": [],
+        "construction_cost": 13353000.0,
+        "chamber_construction_cost": 0,
+        "existing_chamber_tie_in_count": 1,
+        "existing_chamber_tie_in_cost": 5000000,
+        "unconnected_penalty": 0,
+        "calculated_cost": 13353000.0,
+        "new_network_length": 100.0,
+        "score": 0.673884
+      },
+      "geometry": null
+    }
+  ]
+}

@@ -1,0 +1,172 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": "depth-contract-1"
+    },
+    "sourceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "depthReference": {
+      "const": "top_of_design_envelope"
+    },
+    "positiveDirection": {
+      "const": "down"
+    },
+    "surface": {
+      "const": "horizontal"
+    },
+    "metricSrid": {
+      "const": 32637
+    },
+    "geoJsonSrid": {
+      "const": 4326
+    },
+    "ordinaryDepthM": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "minimumDepthM": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "maximumSlope": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "diameters": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "diameterMm": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "widthM": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "heightM": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "diameterMm",
+          "widthM",
+          "heightM"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "crossings": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "road",
+              "tram_tracks",
+              "gas_pipeline",
+              "power_cable",
+              "heat_network"
+            ]
+          },
+          "minimumNewTopDepthM": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "existingTopDepthM": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "profileWidthM": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "profileHeightM": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "minimumVerticalClearanceM": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "profileDimensionsFrom": {
+            "const": "catalog-v1.diameters"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "road",
+                  "tram_tracks"
+                ]
+              }
+            },
+            "required": [
+              "minimumNewTopDepthM"
+            ]
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "gas_pipeline",
+                  "power_cable"
+                ]
+              }
+            },
+            "required": [
+              "existingTopDepthM",
+              "profileWidthM",
+              "profileHeightM",
+              "minimumVerticalClearanceM"
+            ]
+          },
+          {
+            "properties": {
+              "type": {
+                "const": "heat_network"
+              }
+            },
+            "required": [
+              "existingTopDepthM",
+              "profileDimensionsFrom",
+              "minimumVerticalClearanceM"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "version",
+    "sourceSha256",
+    "depthReference",
+    "positiveDirection",
+    "surface",
+    "metricSrid",
+    "geoJsonSrid",
+    "ordinaryDepthM",
+    "minimumDepthM",
+    "maximumSlope",
+    "diameters",
+    "crossings"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Generated visualization rules, depth-contract-1 (build resource, not HTTP endpoint)"
+}

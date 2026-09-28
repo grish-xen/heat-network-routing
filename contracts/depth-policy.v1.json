@@ -1,0 +1,19 @@
+{
+  "version": "depth-contract-1",
+  "status": "implementation-agreement-not-organizer-rules",
+  "rootTopDepthM": 3.0,
+  "consumerTopDepthM": 3.0,
+  "junctionContinuity": "equal_new_edge_top_depth",
+  "specialPassProfile": "constant_depth_across_full_special_interval",
+  "newEdgePlanCrossingOutsideNode": "forbidden",
+  "profileInterpolation": "linear_in_cumulative_horizontal_length",
+  "visualizationRules": "contracts/visualization-rules.v1.json",
+  "diagnosticCodes": [
+    "DEPTH_VALUE_INVALID",
+    "DEPTH_CLEARANCE_VIOLATION",
+    "DEPTH_SLOPE_VIOLATION",
+    "DEPTH_CONTINUITY_VIOLATION",
+    "DEPTH_PROFILE_NOT_FOUND",
+    "SEARCH_BUDGET_EXHAUSTED"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "version": "depth-contract-1",
+  "application": "Deep-copy expectedVariant from the named case and apply each JSON Pointer replacement before validation. Recompute unrelated costs when using these mutations in a full calculator test. expectedCode must be present; extra diagnostics are permitted.",
+  "cases": [
+    { "id": "missing-depth", "base": "flat", "replace": { "/edges/0/depthStartM": null }, "expectedCode": "DEPTH_VALUE_INVALID" },
+    { "id": "boolean-is-not-a-depth", "base": "flat", "replace": { "/edges/0/depthStartM": true }, "expectedCode": "DEPTH_VALUE_INVALID" },
+    { "id": "shallower-than-minimum", "base": "flat", "replace": { "/edges/0/depthStartM": 0.69 }, "expectedCode": "DEPTH_VALUE_INVALID" },
+    { "id": "too-steep", "base": "gas-below", "replace": { "/edges/1/depthEndM": 3.41 }, "expectedCode": "DEPTH_SLOPE_VIOLATION" },
+    { "id": "gas-clearance", "base": "gas-below", "replace": { "/edges/2/depthStartM": 3.39, "/edges/2/depthEndM": 3.39 }, "expectedCode": "DEPTH_CLEARANCE_VIOLATION" },
+    { "id": "gas-above-envelope", "base": "gas-above", "replace": { "/edges/2/depthStartM": 2.45, "/edges/2/depthEndM": 2.45 }, "expectedCode": "DEPTH_CLEARANCE_VIOLATION" },
+    { "id": "cable-clearance", "base": "cable-below", "replace": { "/edges/2/depthStartM": 3.39, "/edges/2/depthEndM": 3.39 }, "expectedCode": "DEPTH_CLEARANCE_VIOLATION" },
+    { "id": "network-clearance", "base": "network-below", "replace": { "/edges/2/depthStartM": 3.94, "/edges/2/depthEndM": 3.94 }, "expectedCode": "DEPTH_CLEARANCE_VIOLATION" },
+    { "id": "road-too-shallow", "base": "road", "replace": { "/edges/1/depthStartM": 0.99, "/edges/1/depthEndM": 0.99 }, "expectedCode": "DEPTH_CLEARANCE_VIOLATION" },
+    { "id": "branch-discontinuity", "base": "branch", "replace": { "/edges/2/depthStartM": 3.1 }, "expectedCode": "DEPTH_CONTINUITY_VIOLATION" }
+  ]
+}

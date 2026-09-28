@@ -1,0 +1,104 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "source",
+        "object_type": "source"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.4895547243265,
+          55.670119976927936
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "existing-line",
+        "object_type": "heat_network",
+        "diameter": 300
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.4895547243265,
+            55.670119976927936
+          ],
+          [
+            37.489520115674196,
+            55.67101820738825
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "existing-chamber",
+        "object_type": "heat_chamber"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.489520115674196,
+          55.67101820738825
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1,
+        "object_type": "oks_connection_point",
+        "flow_tph": 10
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.49110947571877,
+          55.67103775682441
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "crossing",
+        "object_type": "restriction",
+        "restriction_type": "road"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              37.490162778433714,
+              55.670846383498656
+            ],
+            [
+              37.490480648987315,
+              55.67085029335972
+            ],
+            [
+              37.49046681386716,
+              55.67120958567158
+            ],
+            [
+              37.49014894040288,
+              55.67120567575819
+            ],
+            [
+              37.490162778433714,
+              55.670846383498656
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

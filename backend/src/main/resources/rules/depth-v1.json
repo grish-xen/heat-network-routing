@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "status": "contract-only",
+  "sourceSha256": "c757f68dcf58f23abd18cb9217cd65107102bd53653a7485041d4363e54b71d6",
+  "depthReference": "top_of_design_envelope",
+  "positiveDirection": "down",
+  "surface": "horizontal",
+  "ordinaryDepthM": 3.0,
+  "minimumDepthM": 0.7,
+  "maximumSlope": 0.10,
+  "maximumDepthM": null,
+  "depthStepM": null,
+  "lengthBasis": "horizontal_EPSG_32637",
+  "cost": { "thresholdM": 3.0, "baseCoefficient": 1.0, "incrementPerM": 0.10 },
+  "crossings": [
+    { "type": "road", "minimumNewTopDepthM": 1.0 },
+    { "type": "tram_tracks", "minimumNewTopDepthM": 1.2 },
+    { "type": "gas_pipeline", "existingTopDepthM": 2.8, "profileWidthM": 0.4, "profileHeightM": 0.4, "minimumVerticalClearanceM": 0.2 },
+    { "type": "power_cable", "existingTopDepthM": 2.7, "profileWidthM": 0.2, "profileHeightM": 0.2, "minimumVerticalClearanceM": 0.5 },
+    { "type": "heat_network", "existingTopDepthM": 3.0, "profileDimensionsFrom": "catalog-v1.diameters", "minimumVerticalClearanceM": 0.5 }
+  ]
+}

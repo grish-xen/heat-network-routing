@@ -10,6 +10,10 @@
 
 ## Начало работы
 
+Следующий этап команды: [план режима глубины и 3D](docs/DEPTH_DEVELOPMENT_PLAN.md) — распределение задач, стыки модулей и критерии готовности. Документ описывает будущую разработку; DEPTH пока не реализован.
+
+Для параллельной работы подготовлены [контракт глубины](docs/DEPTH_CONTRACT.md), [расчётные примеры](test-data/synthetic/depth/README.md) и [ответы API для интерфейса](test-data/api/depth/README.md).
+
 1. Прочитайте [инструкцию для четырёх участников](docs/TEAM_WORKFLOW.md) и выберите свою задачу.
 2. Прочитайте [правила](docs/RULES.md), [модель](docs/DATA_MODEL.md) и [контракты модулей](docs/MODULE_CONTRACTS.md).
 3. Запустите проверки из корня проекта: `python scripts/check_repository.py` (Python 3.9+) и `mvn -f backend/pom.xml verify` (JDK 11, Maven 3.9.9).

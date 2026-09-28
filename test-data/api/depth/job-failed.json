@@ -1,0 +1,7 @@
+{
+  "jobId": "00000000-0000-4000-8000-000000000004",
+  "status": "FAILED",
+  "stage": "FAILED",
+  "mode": "depth",
+  "diagnostics": [{ "code": "DEPTH_PROFILE_NOT_FOUND", "message": "Не найден допустимый профиль ни для одного возвращённого кандидата.", "details": [{ "candidateId": "illustrative-candidate", "segmentId": "route", "inputObjectId": 1 }] }]
+}

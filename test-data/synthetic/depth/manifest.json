@@ -1,0 +1,14 @@
+{
+  "version": "depth-contract-1",
+  "cases": [
+    "flat",
+    "gas-below",
+    "gas-above",
+    "cable-below",
+    "network-below",
+    "road",
+    "branch"
+  ],
+  "apiCase": "gas-below",
+  "policy": "contracts/depth-policy.v1.json"
+}

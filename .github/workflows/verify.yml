@@ -59,6 +59,7 @@ jobs:
             }
       - run: python -m pip install -r scripts/requirements-checks.txt
       - run: python -m openapi_spec_validator contracts/openapi.json
+      - run: python scripts/check_depth_schemas.py
       - run: docker compose config --quiet
   frontend:
     runs-on: ubuntu-22.04
