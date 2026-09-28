@@ -9,6 +9,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.PriorityQueue;
 import java.util.Set;
 import org.locationtech.jts.geom.Coordinate;
@@ -50,6 +52,7 @@ import ru.hackathon.heatnetwork.model.ObjectId;
  * coordinator can still evaluate the penalty variant.</p>
  */
 public final class GridRoutePlanner {
+    private static final Logger LOG = LoggerFactory.getLogger(GridRoutePlanner.class);
 
     /** Safety cap on attempts per target; real exhaustion is tracked by the stage machine. */
     static final int MAX_TRACES_PER_TARGET = 100;
@@ -90,6 +93,8 @@ public final class GridRoutePlanner {
         final TieOption tie;
         /** Root→target (direct) or tap point→target (tapped) polyline. */
         final List<Coordinate> points;
+        /** Cached LineString for fast intersection checks. */
+        final LineString polyline;
         /** Root key of the tree this trace belongs to. */
         final String rootId;
         /** Parent trace target when tapped; null for a direct trace. */
@@ -102,6 +107,7 @@ public final class GridRoutePlanner {
             this.targetId = targetId;
             this.tie = tie;
             this.points = points;
+            this.polyline = new GeometryFactory().createLineString(points.toArray(new Coordinate[0]));
             this.rootId = rootId;
             this.tapParentTargetId = tapParentTargetId;
             this.tapVertexIndex = tapVertexIndex;
@@ -699,6 +705,9 @@ public final class GridRoutePlanner {
         int maxExpansions = (int) (BASE_MAX_EXPANSIONS * (25.0 / step) * distanceFactor);
         String currentKey = startKey;
         while (!open.isEmpty()) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Route search interrupted");
+            }
             currentKey = open.poll();
             if (currentKey == null) {
                 return null;
@@ -795,7 +804,10 @@ public final class GridRoutePlanner {
         }
         LineString segment = gf.createLineString(new Coordinate[] {from, to});
         for (Trace trace : acceptedTraces.values()) {
-            LineString polyline = gf.createLineString(trace.points.toArray(new Coordinate[0]));
+            LineString polyline = trace.polyline;
+            if (!segment.getEnvelopeInternal().intersects(polyline.getEnvelopeInternal())) {
+                continue;
+            }
             if (!segment.intersects(polyline)) {
                 continue;
             }
@@ -842,11 +854,8 @@ public final class GridRoutePlanner {
             current = cameFrom.get(current);
         }
         Collections.reverse(path);
-        if (path.size() == 1) {
-            // The start point itself is within reach of the goal: keep it as the start.
+        if (!path.get(path.size() - 1).equals2D(goal) || path.size() == 1) {
             path.add(goal);
-        } else {
-            path.set(path.size() - 1, goal);
         }
         return path;
     }
