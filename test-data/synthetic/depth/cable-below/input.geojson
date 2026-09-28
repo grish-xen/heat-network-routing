@@ -1,0 +1,90 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "source",
+        "object_type": "source"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.45783933111861,
+          55.66792824650364
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "existing-line",
+        "object_type": "heat_network",
+        "diameter": 300
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.45783933111861,
+            55.66792824650364
+          ],
+          [
+            37.457803998846636,
+            55.66882646402935
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "existing-chamber",
+        "object_type": "heat_chamber"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.457803998846636,
+          55.66882646402935
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1,
+        "object_type": "oks_connection_point",
+        "flow_tph": 10
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.459393246621005,
+          55.66884642355713
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "crossing",
+        "object_type": "restriction",
+        "restriction_type": "power_cable"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.45860921691922,
+            55.66856698102195
+          ],
+          [
+            37.4585880278698,
+            55.66910591169365
+          ]
+        ]
+      }
+    }
+  ]
+}

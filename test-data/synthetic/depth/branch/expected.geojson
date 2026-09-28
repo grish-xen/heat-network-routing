@@ -1,0 +1,131 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-trunk",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "existing-chamber",
+        "end_node_id": "depth-branch",
+        "flow_tph": 25,
+        "diameter": 125,
+        "length": 50.0,
+        "laying_method": "base",
+        "depth_start": 3,
+        "depth_end": 3,
+        "cost": 4863750.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.50537955705066,
+            55.67211101283066
+          ],
+          [
+            37.50617426474842,
+            55.67212068758307
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-a",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "depth-branch",
+        "end_node_id": 1,
+        "flow_tph": 10,
+        "diameter": 80,
+        "length": 50.0,
+        "laying_method": "base",
+        "depth_start": 3,
+        "depth_end": 3,
+        "cost": 4176500.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.50617426474842,
+            55.67212068758307
+          ],
+          [
+            37.50696897292987,
+            55.6721303571922
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-b",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "depth-branch",
+        "end_node_id": "1",
+        "flow_tph": 15,
+        "diameter": 100,
+        "length": 50.0,
+        "laying_method": "base",
+        "depth_start": 3,
+        "depth_end": 3,
+        "cost": 4487400.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.50617426474842,
+            55.67212068758307
+          ],
+          [
+            37.50615714974019,
+            55.67256980610279
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-branch",
+        "object_type": "heat_chamber",
+        "variant_id": "variant-1",
+        "diameter": 125,
+        "cost": 3000000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.50617426474842,
+          55.67212068758307
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-summary",
+        "object_type": "variant_summary",
+        "variant_id": "variant-1",
+        "rank": 1,
+        "unconnected_oks_ids": [],
+        "construction_cost": 21527650.0,
+        "chamber_construction_cost": 3000000,
+        "existing_chamber_tie_in_count": 1,
+        "existing_chamber_tie_in_cost": 5000000,
+        "unconnected_penalty": 0,
+        "calculated_cost": 21527650.0,
+        "new_network_length": 150.0,
+        "score": 1.0527742
+      },
+      "geometry": null
+    }
+  ]
+}

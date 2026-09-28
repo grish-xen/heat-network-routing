@@ -1,0 +1,308 @@
+{
+  "fixtureVersion": "depth-contract-1",
+  "status": "illustrative-not-solver-output",
+  "srid": 32637,
+  "caseId": "branch",
+  "inputObjects": [
+    {
+      "id": "source",
+      "object_type": "source",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          406000,
+          6170500
+        ]
+      }
+    },
+    {
+      "id": "existing-line",
+      "object_type": "heat_network",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            406000,
+            6170500
+          ],
+          [
+            406000,
+            6170600
+          ]
+        ]
+      },
+      "diameter": 300
+    },
+    {
+      "id": "existing-chamber",
+      "object_type": "heat_chamber",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          406000,
+          6170600
+        ]
+      }
+    },
+    {
+      "id": 1,
+      "object_type": "oks_connection_point",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          406100,
+          6170600
+        ]
+      },
+      "flow_tph": 10
+    },
+    {
+      "id": "1",
+      "object_type": "oks_connection_point",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          406050,
+          6170650
+        ]
+      },
+      "flow_tph": 15
+    }
+  ],
+  "candidate": {
+    "candidateId": "branch",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "EXISTING_CHAMBER",
+        "inputObjectId": "existing-chamber",
+        "xy": [
+          406000,
+          6170600
+        ]
+      },
+      {
+        "id": "target",
+        "kind": "CONNECTION_POINT",
+        "inputObjectId": 1,
+        "xy": [
+          406100,
+          6170600
+        ]
+      },
+      {
+        "id": "branch",
+        "kind": "NEW_CHAMBER",
+        "inputObjectId": null,
+        "xy": [
+          406050,
+          6170600
+        ]
+      },
+      {
+        "id": "other",
+        "kind": "CONNECTION_POINT",
+        "inputObjectId": "1",
+        "xy": [
+          406050,
+          6170650
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "trunk",
+        "fromNodeId": "root",
+        "toNodeId": "branch",
+        "xy": [
+          [
+            406000,
+            6170600
+          ],
+          [
+            406050,
+            6170600
+          ]
+        ]
+      },
+      {
+        "id": "a",
+        "fromNodeId": "branch",
+        "toNodeId": "target",
+        "xy": [
+          [
+            406050,
+            6170600
+          ],
+          [
+            406100,
+            6170600
+          ]
+        ]
+      },
+      {
+        "id": "b",
+        "fromNodeId": "branch",
+        "toNodeId": "other",
+        "xy": [
+          [
+            406050,
+            6170600
+          ],
+          [
+            406050,
+            6170650
+          ]
+        ]
+      }
+    ],
+    "attachments": [
+      {
+        "rootNodeId": "root",
+        "existingObjectId": "existing-chamber"
+      }
+    ],
+    "unconnectedPointIds": [],
+    "diagnostics": []
+  },
+  "expectedVariant": {
+    "variantId": "variant-1",
+    "mode": "DEPTH",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "EXISTING_CHAMBER",
+        "inputObjectId": "existing-chamber",
+        "xy": [
+          406000,
+          6170600
+        ]
+      },
+      {
+        "id": "target",
+        "kind": "CONNECTION_POINT",
+        "inputObjectId": 1,
+        "xy": [
+          406100,
+          6170600
+        ]
+      },
+      {
+        "id": "branch",
+        "kind": "NEW_CHAMBER",
+        "inputObjectId": null,
+        "xy": [
+          406050,
+          6170600
+        ]
+      },
+      {
+        "id": "other",
+        "kind": "CONNECTION_POINT",
+        "inputObjectId": "1",
+        "xy": [
+          406050,
+          6170650
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "trunk",
+        "fromNodeId": "root",
+        "toNodeId": "branch",
+        "xy": [
+          [
+            406000,
+            6170600
+          ],
+          [
+            406050,
+            6170600
+          ]
+        ],
+        "flowTph": 25,
+        "diameterMm": 125,
+        "lengthM": 50.0,
+        "depthStartM": 3,
+        "depthEndM": 3,
+        "layingMethod": "BASE",
+        "specialCoefficient": 1,
+        "crossedObjectIds": [],
+        "costRub": 4863750.0
+      },
+      {
+        "id": "a",
+        "fromNodeId": "branch",
+        "toNodeId": "target",
+        "xy": [
+          [
+            406050,
+            6170600
+          ],
+          [
+            406100,
+            6170600
+          ]
+        ],
+        "flowTph": 10,
+        "diameterMm": 80,
+        "lengthM": 50.0,
+        "depthStartM": 3,
+        "depthEndM": 3,
+        "layingMethod": "BASE",
+        "specialCoefficient": 1,
+        "crossedObjectIds": [],
+        "costRub": 4176500.0
+      },
+      {
+        "id": "b",
+        "fromNodeId": "branch",
+        "toNodeId": "other",
+        "xy": [
+          [
+            406050,
+            6170600
+          ],
+          [
+            406050,
+            6170650
+          ]
+        ],
+        "flowTph": 15,
+        "diameterMm": 100,
+        "lengthM": 50.0,
+        "depthStartM": 3,
+        "depthEndM": 3,
+        "layingMethod": "BASE",
+        "specialCoefficient": 1,
+        "crossedObjectIds": [],
+        "costRub": 4487400.0
+      }
+    ],
+    "attachments": [
+      {
+        "rootNodeId": "root",
+        "existingObjectId": "existing-chamber"
+      }
+    ],
+    "newChambers": [
+      {
+        "nodeId": "branch",
+        "diameterMm": 125,
+        "costRub": 3000000
+      }
+    ],
+    "unconnectedPointIds": [],
+    "summary": {
+      "constructionCost": 21527650.0,
+      "chamberConstructionCost": 3000000,
+      "existingChamberTieInCount": 1,
+      "existingChamberTieInCost": 5000000,
+      "unconnectedPenalty": 0,
+      "calculatedCost": 21527650.0,
+      "newNetworkLength": 150.0,
+      "score": 1.0527742
+    }
+  }
+}

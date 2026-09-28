@@ -1,0 +1,234 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-edge-1",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "existing-chamber",
+        "end_node_id": "depth-tech-1",
+        "flow_tph": 10,
+        "diameter": 80,
+        "length": 42.0,
+        "laying_method": "base",
+        "depth_start": 3,
+        "depth_end": 3,
+        "cost": 3508260.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.44194732728845,
+            55.66772752663389
+          ],
+          [
+            37.44261478740521,
+            55.66773599824786
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-edge-2",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "depth-tech-1",
+        "end_node_id": "depth-tech-2",
+        "flow_tph": 10,
+        "diameter": 80,
+        "length": 6.0,
+        "laying_method": "base",
+        "depth_start": 3,
+        "depth_end": 2.4,
+        "cost": 501180.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.44261478740521,
+            55.66773599824786
+          ],
+          [
+            37.442710138879505,
+            55.667737208182245
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-edge-3",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "depth-tech-2",
+        "end_node_id": "depth-tech-3",
+        "flow_tph": 10,
+        "diameter": 80,
+        "length": 4.0,
+        "laying_method": "special",
+        "depth_start": 2.4,
+        "depth_end": 2.4,
+        "cost": 417650.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.442710138879505,
+            55.667737208182245
+          ],
+          [
+            37.44277370653307,
+            55.66773801476404
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-edge-4",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "depth-tech-3",
+        "end_node_id": "depth-tech-4",
+        "flow_tph": 10,
+        "diameter": 80,
+        "length": 6.0,
+        "laying_method": "base",
+        "depth_start": 2.4,
+        "depth_end": 3,
+        "cost": 501180.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.44277370653307,
+            55.66773801476404
+          ],
+          [
+            37.442869058019454,
+            55.66773922457502
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-edge-5",
+        "object_type": "heat_network",
+        "variant_id": "variant-1",
+        "start_node_id": "depth-tech-4",
+        "end_node_id": 1,
+        "flow_tph": 10,
+        "diameter": 80,
+        "length": 42.0,
+        "laying_method": "base",
+        "depth_start": 3,
+        "depth_end": 3,
+        "cost": 3508260.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            37.442869058019454,
+            55.66773922457502
+          ],
+          [
+            37.44353651862738,
+            55.667747691178576
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-tech-1",
+        "object_type": "technical_node",
+        "variant_id": "variant-1"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.44261478740521,
+          55.66773599824786
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-tech-2",
+        "object_type": "technical_node",
+        "variant_id": "variant-1"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.442710138879505,
+          55.667737208182245
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-tech-3",
+        "object_type": "technical_node",
+        "variant_id": "variant-1"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.44277370653307,
+          55.66773801476404
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-tech-4",
+        "object_type": "technical_node",
+        "variant_id": "variant-1"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          37.442869058019454,
+          55.66773922457502
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "depth-summary",
+        "object_type": "variant_summary",
+        "variant_id": "variant-1",
+        "rank": 1,
+        "unconnected_oks_ids": [],
+        "construction_cost": 13436530.0,
+        "chamber_construction_cost": 0,
+        "existing_chamber_tie_in_count": 1,
+        "existing_chamber_tie_in_cost": 5000000,
+        "unconnected_penalty": 0,
+        "calculated_cost": 13436530.0,
+        "new_network_length": 100.0,
+        "score": 0.67622284
+      },
+      "geometry": null
+    }
+  ]
+}

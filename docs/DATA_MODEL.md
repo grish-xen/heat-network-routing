@@ -1,5 +1,7 @@
 # Модель команды — контракт 1.0
 
+Дополнение для будущей реализации DEPTH: [DEPTH_CONTRACT.md](DEPTH_CONTRACT.md), версия `depth-contract-1`. Java-типы не меняются. Глубины CalculatedEdge — до верха габарита, линейно по горизонтальной длине; начало/конец следуют ориентации ребра. Примеры и policy уже подготовлены; исполняемый DEPTH пока отсутствует.
+
 Точные Java-типы: `backend/src/main/java/ru/hackathon/heatnetwork/model/Model.java`, `ObjectId.java`, `Dataset.java`. Общие DTO находятся внутри класса `Model`, например `Model.RouteCandidate`. Это компактное начальное расположение типов; перенос в отдельные файлы согласуется общим PR.
 
 ## Координаты, ID и числа

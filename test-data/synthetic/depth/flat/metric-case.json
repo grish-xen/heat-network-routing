@@ -1,0 +1,184 @@
+{
+  "fixtureVersion": "depth-contract-1",
+  "status": "illustrative-not-solver-output",
+  "srid": 32637,
+  "caseId": "flat",
+  "inputObjects": [
+    {
+      "id": "source",
+      "object_type": "source",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          400000,
+          6169900
+        ]
+      }
+    },
+    {
+      "id": "existing-line",
+      "object_type": "heat_network",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            400000,
+            6169900
+          ],
+          [
+            400000,
+            6170000
+          ]
+        ]
+      },
+      "diameter": 300
+    },
+    {
+      "id": "existing-chamber",
+      "object_type": "heat_chamber",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          400000,
+          6170000
+        ]
+      }
+    },
+    {
+      "id": 1,
+      "object_type": "oks_connection_point",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          400100,
+          6170000
+        ]
+      },
+      "flow_tph": 10
+    }
+  ],
+  "candidate": {
+    "candidateId": "flat",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "EXISTING_CHAMBER",
+        "inputObjectId": "existing-chamber",
+        "xy": [
+          400000,
+          6170000
+        ]
+      },
+      {
+        "id": "target",
+        "kind": "CONNECTION_POINT",
+        "inputObjectId": 1,
+        "xy": [
+          400100,
+          6170000
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "route",
+        "fromNodeId": "root",
+        "toNodeId": "target",
+        "xy": [
+          [
+            400000,
+            6170000
+          ],
+          [
+            400025,
+            6170000
+          ],
+          [
+            400100,
+            6170000
+          ]
+        ]
+      }
+    ],
+    "attachments": [
+      {
+        "rootNodeId": "root",
+        "existingObjectId": "existing-chamber"
+      }
+    ],
+    "unconnectedPointIds": [],
+    "diagnostics": []
+  },
+  "expectedVariant": {
+    "variantId": "variant-1",
+    "mode": "DEPTH",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "EXISTING_CHAMBER",
+        "inputObjectId": "existing-chamber",
+        "xy": [
+          400000,
+          6170000
+        ]
+      },
+      {
+        "id": "target",
+        "kind": "CONNECTION_POINT",
+        "inputObjectId": 1,
+        "xy": [
+          400100,
+          6170000
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-1",
+        "fromNodeId": "root",
+        "toNodeId": "target",
+        "xy": [
+          [
+            400000,
+            6170000
+          ],
+          [
+            400025,
+            6170000
+          ],
+          [
+            400100,
+            6170000
+          ]
+        ],
+        "flowTph": 10,
+        "diameterMm": 80,
+        "lengthM": 100.0,
+        "depthStartM": 3,
+        "depthEndM": 3,
+        "layingMethod": "BASE",
+        "specialCoefficient": 1,
+        "crossedObjectIds": [],
+        "costRub": 8353000.0
+      }
+    ],
+    "attachments": [
+      {
+        "rootNodeId": "root",
+        "existingObjectId": "existing-chamber"
+      }
+    ],
+    "newChambers": [],
+    "unconnectedPointIds": [],
+    "summary": {
+      "constructionCost": 13353000.0,
+      "chamberConstructionCost": 0,
+      "existingChamberTieInCount": 1,
+      "existingChamberTieInCost": 5000000,
+      "unconnectedPenalty": 0,
+      "calculatedCost": 13353000.0,
+      "newNetworkLength": 100.0,
+      "score": 0.673884
+    }
+  }
+}

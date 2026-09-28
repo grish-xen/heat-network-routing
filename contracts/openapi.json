@@ -3,7 +3,7 @@
   "info": {
     "title": "Heat Network Routing team API",
     "version": "1.0.0",
-    "description": "Version 1 integration contract. Health, upload, job status, ranked variants, streamed result download and paginated map are implemented. Jobs parse, route, calculate, validate, export and persist map archives."
+    "description": "Version 1 integration contract. Health, upload, job status, ranked variants, streamed result download and paginated map are implemented. Jobs parse, route, calculate, validate, export and persist map archives. depth-contract-1 defines future depth semantics and fixtures only; DEPTH remains unimplemented."
   },
   "paths": {
     "/api/health": {
@@ -63,7 +63,8 @@
                       "2d",
                       "depth"
                     ],
-                    "default": "2d"
+                    "default": "2d",
+                    "description": "2d is implemented. depth is reserved by depth-contract-1; currently HTTP 422 UNSUPPORTED_MODE. Fixtures describing depth success do not enable the server mode."
                   }
                 }
               }
@@ -547,7 +548,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, RESULT_NOT_READY, ROUTE_NOT_FOUND, OUTPUT_LIMIT_EXCEEDED, RESULT_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. Legacy PROCESSING_UNAVAILABLE may remain in stored jobs from older versions. This is an extensible string, not a closed enum. Map errors include INVALID_LAYER, INVALID_BBOX, INVALID_VARIANT, INVALID_LIMIT, INVALID_CURSOR, INVALID_MAP_QUERY, VARIANT_NOT_FOUND, MAP_DATA_UNAVAILABLE and MAP_FEATURE_TOO_LARGE."
+            "description": "Includes input diagnostic codes, FILE_TOO_LARGE, UNSUPPORTED_MODE, QUEUE_FULL, JOB_NOT_FOUND, RESULT_NOT_READY, ROUTE_NOT_FOUND, OUTPUT_LIMIT_EXCEEDED, RESULT_UNAVAILABLE, JOB_INTERRUPTED, SERVER_RESTARTED and INTERNAL_ERROR. Legacy PROCESSING_UNAVAILABLE may remain in stored jobs from older versions. This is an extensible string, not a closed enum. Map errors include INVALID_LAYER, INVALID_BBOX, INVALID_VARIANT, INVALID_LIMIT, INVALID_CURSOR, INVALID_MAP_QUERY, VARIANT_NOT_FOUND, MAP_DATA_UNAVAILABLE and MAP_FEATURE_TOO_LARGE. Planned depth-contract-1 adds DEPTH_VALUE_INVALID, DEPTH_CLEARANCE_VIOLATION, DEPTH_SLOPE_VIOLATION, DEPTH_CONTINUITY_VIOLATION, DEPTH_PROFILE_NOT_FOUND and SEARCH_BUDGET_EXHAUSTED."
           },
           "message": {
             "type": "string"
@@ -901,6 +902,40 @@
                   "base",
                   "special"
                 ]
+              },
+              "start_node_id": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "end_node_id": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "depth_start": {
+                "type": "number",
+                "format": "double",
+                "nullable": true,
+                "minimum": 0.7,
+                "description": "Depth in metres to top of design envelope at the first coordinate; positive down. Null in 2d. Required finite numeric value for result heat_network in future depth mode. Interpolate by cumulative horizontal metric length."
+              },
+              "depth_end": {
+                "type": "number",
+                "format": "double",
+                "nullable": true,
+                "minimum": 0.7,
+                "description": "Depth in metres to top of design envelope at the last coordinate; positive down. Null in 2d. Required finite numeric value for result heat_network in future depth mode. Interpolate by cumulative horizontal metric length."
               }
             },
             "additionalProperties": true
@@ -976,6 +1011,113 @@
             "description": "[minLon,minLat,maxLon,maxLat] in WGS84; null for empty union. Minima may equal maxima."
           }
         }
+      },
+      "DepthNetworkProperties": {
+        "type": "object",
+        "required": [
+          "id",
+          "object_type",
+          "variant_id",
+          "start_node_id",
+          "end_node_id",
+          "flow_tph",
+          "diameter",
+          "length",
+          "laying_method",
+          "depth_start",
+          "depth_end",
+          "cost"
+        ],
+        "properties": {
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "object_type": {
+            "type": "string",
+            "enum": [
+              "heat_network"
+            ]
+          },
+          "variant_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "start_node_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "end_node_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "flow_tph": {
+            "type": "number",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "diameter": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "length": {
+            "type": "number",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "laying_method": {
+            "type": "string",
+            "enum": [
+              "base",
+              "special"
+            ]
+          },
+          "depth_start": {
+            "type": "number",
+            "format": "double",
+            "nullable": false,
+            "minimum": 0.7,
+            "description": "Depth in metres to top of design envelope at the first coordinate; positive down. Null in 2d. Required finite numeric value for result heat_network in future depth mode. Interpolate by cumulative horizontal metric length."
+          },
+          "depth_end": {
+            "type": "number",
+            "format": "double",
+            "nullable": false,
+            "minimum": 0.7,
+            "description": "Depth in metres to top of design envelope at the last coordinate; positive down. Null in 2d. Required finite numeric value for result heat_network in future depth mode. Interpolate by cumulative horizontal metric length."
+          },
+          "cost": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": true,
+        "description": "Future depth result heat_network properties, depth-contract-1. Does not apply to input features or 2d results. Geometry remains two-dimensional WGS84. Not yet emitted by backend.",
+        "x-implementation": "planned"
       }
     }
   }
