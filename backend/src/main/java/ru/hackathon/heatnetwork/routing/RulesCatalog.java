@@ -214,4 +214,52 @@ public final class RulesCatalog {
     public String version() {
         return version;
     }
+
+    /** Typed loader for the depth supplement {@code rules/depth-v1.json}.
+     *  No depth constants are duplicated inside calculation; all values come from this file. */
+    public static DepthCatalog loadDepth() {
+        try (InputStream in = RulesCatalog.class.getResourceAsStream("/rules/depth-v1.json")) {
+            if (in == null) {
+                throw new IllegalStateException("rules/depth-v1.json is not on the classpath");
+            }
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.readValue(in, DepthCatalog.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot load rules/depth-v1.json", e);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static final class DepthCatalog {
+        public String version;
+        public String status;
+        public String depthReference;
+        public String positiveDirection;
+        public String surface;
+        public double ordinaryDepthM;
+        public double minimumDepthM;
+        public Double maximumDepthM;
+        public double maximumSlope;
+        public Double depthStepM;
+        public String lengthBasis;
+        public CostRule cost = new CostRule();
+        public List<CrossingRule> crossings = new ArrayList<>();
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static final class CostRule {
+            public double thresholdM;
+            public double baseCoefficient;
+            public double incrementPerM;
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static final class CrossingRule {
+            public String type;
+            public Double existingTopDepthM;
+            public Double profileWidthM;
+            public Double profileHeightM;
+            public Double minimumVerticalClearanceM;
+            public Double minimumNewTopDepthM;
+        }
+    }
 }
