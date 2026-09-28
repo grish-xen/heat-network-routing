@@ -1,0 +1,90 @@
+name: Compose persistence
+on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  compose:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compose: [v2, '1.29.2']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install legacy Compose
+        if: matrix.compose == '1.29.2'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/docker/compose/releases/download/1.29.2/docker-compose-Linux-x86_64 \
+            --output docker-compose-Linux-x86_64
+          curl --fail --silent --show-error --location \
+            https://github.com/docker/compose/releases/download/1.29.2/docker-compose-Linux-x86_64.sha256 \
+            --output docker-compose-Linux-x86_64.sha256
+          sha256sum --check docker-compose-Linux-x86_64.sha256
+          chmod +x docker-compose-Linux-x86_64
+      - name: Build, calculate, recreate and verify persistence
+        env:
+          COMPOSE_VERSION: ${{ matrix.compose }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="heat-restart-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${COMPOSE_VERSION//./-}"
+          cat > "$RUNNER_TEMP/compose-check.yml" <<'YAML'
+          services:
+            backend:
+              environment:
+                JAVA_TOOL_OPTIONS: -Xmx512m
+          YAML
+          compose() {
+            if [ "$COMPOSE_VERSION" = '1.29.2' ]; then
+              "$RUNNER_TEMP/docker-compose-Linux-x86_64" -p "$project" -f docker-compose.yml -f "$RUNNER_TEMP/compose-check.yml" "$@"
+            else
+              docker compose -p "$project" -f docker-compose.yml -f "$RUNNER_TEMP/compose-check.yml" "$@"
+            fi
+          }
+          cleanup() {
+            compose logs --no-color > "$RUNNER_TEMP/compose-services.log" 2>&1 || true
+            compose down --volumes --remove-orphans || true
+          }
+          trap cleanup EXIT
+          ready() {
+            for attempt in {1..90}; do
+              if curl --silent --fail --max-time 2 http://127.0.0.1:8080/api/health > /dev/null; then return; fi
+              sleep 1
+            done
+            compose logs --no-color
+            return 1
+          }
+          compose version
+          compose config --quiet
+          compose build backend
+          compose up -d
+          ready
+          compose exec -T backend java -version
+          python scripts/check_restart_api.py capture --snapshot "$RUNNER_TEMP/restart-snapshot.json" \
+            --report "$RUNNER_TEMP/restart-capture.json"
+          before=$(compose ps -q backend)
+          volume_before=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/heat-network/jobs"}}{{.Name}}{{end}}{{end}}' "$before")
+          test -n "$volume_before"
+          compose down
+          compose up -d
+          ready
+          after=$(compose ps -q backend)
+          test "$before" != "$after"
+          volume_after=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/heat-network/jobs"}}{{.Name}}{{end}}{{end}}' "$after")
+          test "$volume_before" = "$volume_after"
+          python scripts/check_restart_api.py verify --snapshot "$RUNNER_TEMP/restart-snapshot.json" \
+            --report "$RUNNER_TEMP/restart-verify.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compose-${{ matrix.compose }}-reports
+          path: |
+            ${{ runner.temp }}/restart-*.json
+            ${{ runner.temp }}/compose-services.log
+          retention-days: 7
