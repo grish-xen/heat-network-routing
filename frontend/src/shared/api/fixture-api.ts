@@ -3,6 +3,10 @@ import { parse, stringify } from 'lossless-json'
 import inputMapText from '../../../../test-data/api/map-input.json?raw'
 import variantsText from '../../../../test-data/api/variants.json?raw'
 import resultMapText from '../../../../test-data/synthetic/two-consumers/expected.geojson?raw'
+import depthInputMapText from '../../../../test-data/api/depth/map-input.json?raw'
+import depthVariantsText from '../../../../test-data/api/depth/variants.json?raw'
+import depthResultMapText from '../../../../test-data/api/depth/map-result.json?raw'
+import depthResultDownloadText from '../../../../test-data/synthetic/depth/gas-below/expected.geojson?raw'
 import type { Geometry, Health, Job, MapBounds, MapFeature, MapPage, MapQuery, VariantSummary } from '../model/api'
 import type { ObjectId } from '../model/object-id'
 import { objectIdKey } from '../model/object-id'
@@ -39,6 +43,14 @@ function normalizeMapFixture(text: string, excludeSummaries = false): MapPage {
 const inputFeatures = normalizeMapFixture(inputMapText).features
 const resultFeatures = normalizeMapFixture(resultMapText, true).features
 const fixtureVariants = parseVariantsText(variantsText)
+const depthInputFeatures = normalizeMapFixture(depthInputMapText).features
+const depthResultFeatures = normalizeMapFixture(depthResultMapText, true).features
+const depthFixtureVariants = parseVariantsText(depthVariantsText)
+
+interface FixtureJob {
+  readonly createdAt: number
+  readonly mode: Job['mode']
+}
 
 function positions(geometry: Geometry): readonly (readonly [number, number])[] {
   if (geometry.type === 'Point') return [geometry.coordinates]
@@ -71,7 +83,7 @@ function boundsFor(features: readonly MapFeature[]): MapBounds {
 
 export class FixtureHeatNetworkApi implements HeatNetworkApi {
   readonly #now: () => number
-  readonly #jobs = new Map<string, number>()
+  readonly #jobs = new Map<string, FixtureJob>()
   #nextJobId = 1
 
   constructor(options: FixtureOptions = {}) {
@@ -82,11 +94,10 @@ export class FixtureHeatNetworkApi implements HeatNetworkApi {
     return { status: 'UP', contractVersion: '1.0', implementation: 'fixture' }
   }
 
-  async createJob(file: File, mode: '2d'): Promise<Job> {
+  async createJob(file: File, mode: Job['mode']): Promise<Job> {
     void file
-    void mode
     const jobId = `fixture-${this.#nextJobId++}`
-    this.#jobs.set(jobId, this.#now())
+    this.#jobs.set(jobId, { createdAt: this.#now(), mode })
     return this.#job(jobId)
   }
 
@@ -96,26 +107,29 @@ export class FixtureHeatNetworkApi implements HeatNetworkApi {
   }
 
   async listVariants(jobId: string): Promise<readonly VariantSummary[]> {
-    this.#requireJob(jobId)
-    return fixtureVariants
+    return this.#requireJob(jobId).mode === 'depth' ? depthFixtureVariants : fixtureVariants
   }
 
   async getMapBounds(jobId: string, variantId: ObjectId): Promise<MapBounds> {
-    this.#requireJob(jobId)
+    const job = this.#requireJob(jobId)
     const key = objectIdKey(variantId)
+    const inputs = job.mode === 'depth' ? depthInputFeatures : inputFeatures
+    const results = job.mode === 'depth' ? depthResultFeatures : resultFeatures
     return boundsFor([
-      ...inputFeatures,
-      ...resultFeatures.filter((feature) => feature.properties.variantId && objectIdKey(feature.properties.variantId) === key),
+      ...inputs,
+      ...results.filter((feature) => feature.properties.variantId && objectIdKey(feature.properties.variantId) === key),
     ])
   }
 
   async getMapPage(jobId: string, query: MapQuery): Promise<MapPage> {
-    this.#requireJob(jobId)
+    const job = this.#requireJob(jobId)
     const limit = query.limit ?? 1000
     if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
       throw new ApiClientError(400, 'INVALID_LIMIT', 'Размер страницы должен быть от 1 до 5000')
     }
-    const source = query.layer === 'input' ? inputFeatures : resultFeatures
+    const source = query.layer === 'input'
+      ? (job.mode === 'depth' ? depthInputFeatures : inputFeatures)
+      : (job.mode === 'depth' ? depthResultFeatures : resultFeatures)
     const filtered = source.filter(
       (feature) =>
         intersects(feature, query.bbox) &&
@@ -143,26 +157,28 @@ export class FixtureHeatNetworkApi implements HeatNetworkApi {
   }
 
   getResultUrl(jobId: string): string {
-    this.#requireJob(jobId)
-    return `data:application/geo+json;charset=utf-8,${encodeURIComponent(resultMapText)}`
+    const job = this.#requireJob(jobId)
+    const result = job.mode === 'depth' ? depthResultDownloadText : resultMapText
+    return `data:application/geo+json;charset=utf-8,${encodeURIComponent(result)}`
   }
 
-  #requireJob(jobId: string): number {
-    const createdAt = this.#jobs.get(jobId)
-    if (createdAt === undefined) {
+  #requireJob(jobId: string): FixtureJob {
+    const job = this.#jobs.get(jobId)
+    if (job === undefined) {
       throw new ApiClientError(404, 'JOB_NOT_FOUND', 'Расчёт не найден')
     }
-    return createdAt
+    return job
   }
 
   #job(jobId: string): Job {
-    const elapsed = this.#now() - this.#requireJob(jobId)
+    const fixtureJob = this.#requireJob(jobId)
+    const elapsed = this.#now() - fixtureJob.createdAt
     const state = FIXTURE_STAGES.find(({ untilMs }) => elapsed < untilMs) ?? FIXTURE_STAGES.at(-1)!
     return {
       jobId,
       status: state.status,
       stage: state.stage,
-      mode: '2d',
+      mode: fixtureJob.mode,
       diagnostics: [],
     }
   }

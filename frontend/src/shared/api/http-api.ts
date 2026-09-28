@@ -25,7 +25,7 @@ export class HttpHeatNetworkApi implements HeatNetworkApi {
     return this.#request('/api/health', { signal }, parseHealthText)
   }
 
-  createJob(file: File, mode: '2d', signal?: AbortSignal): Promise<Job> {
+  createJob(file: File, mode: Job['mode'], signal?: AbortSignal): Promise<Job> {
     const body = new FormData()
     body.append('file', file, file.name)
     body.append('mode', mode)

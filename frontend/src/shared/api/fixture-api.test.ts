@@ -17,6 +17,19 @@ describe('FixtureHeatNetworkApi', () => {
     expect(await api.getJob(queued.jobId)).toMatchObject({ status: 'SUCCEEDED', stage: 'DONE' })
   })
 
+  it('creates an explicit depth demo job with depth map fields', async () => {
+    let now = 10_000
+    const api = new FixtureHeatNetworkApi({ now: () => now })
+    const job = await api.createJob(new File(['{}'], 'input.geojson'), 'depth' as never)
+    now += 6_000
+
+    await expect(api.getJob(job.jobId)).resolves.toMatchObject({ mode: 'depth', status: 'SUCCEEDED', stage: 'DONE' })
+    const page = await api.getMapPage(job.jobId, {
+      layer: 'result', variantId: { kind: 'string', value: 'variant-1' }, bbox: [37.4, 55.6, 37.5, 55.7],
+    })
+    expect(page.features[0]).toMatchObject({ properties: { depthStart: 3, depthEnd: 3 } })
+  })
+
   it('pages intersecting features without duplicates', async () => {
     const api = new FixtureHeatNetworkApi()
     const job = await api.createJob(new File(['{}'], 'input.geojson'), '2d')

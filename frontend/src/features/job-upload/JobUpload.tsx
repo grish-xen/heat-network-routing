@@ -14,6 +14,7 @@ interface JobUploadProps {
 
 export function JobUpload({ api, onCreated }: JobUploadProps) {
   const [file, setFile] = useState<File | null>(null)
+  const [mode, setMode] = useState<Job['mode']>('2d')
   const mutation = useCreateJob(api, onCreated)
 
   const selectFirstFile = (files: FileList | readonly File[] | null) => {
@@ -34,7 +35,7 @@ export function JobUpload({ api, onCreated }: JobUploadProps) {
       className="upload-form"
       onSubmit={(event) => {
         event.preventDefault()
-        if (file) mutation.mutate(file)
+        if (file) mutation.mutate({ file, mode })
       }}
     >
       <label
@@ -54,7 +55,18 @@ export function JobUpload({ api, onCreated }: JobUploadProps) {
         <strong>{file ? file.name : 'Выберите GeoJSON'}</strong>
         <span>{file ? `${(file.size / 1024).toFixed(1)} КБ` : 'или перетащите файл сюда'}</span>
       </label>
-      <p className="upload-hint">Файл передаётся серверу без обработки в браузере · режим 2D</p>
+      <fieldset className="mode-selector">
+        <legend>Режим расчёта</legend>
+        <label>
+          <input type="radio" name="mode" value="2d" checked={mode === '2d'} onChange={() => setMode('2d')} />
+          2D
+        </label>
+        <label>
+          <input type="radio" name="mode" value="depth" checked={mode === 'depth'} onChange={() => setMode('depth')} />
+          С учётом глубины
+        </label>
+      </fieldset>
+      <p className="upload-hint">Файл передаётся серверу без обработки в браузере · режим {mode === '2d' ? '2D' : 'с учётом глубины'}</p>
       {mutation.error && (
         <Alert>{mutation.error instanceof Error ? mutation.error.message : 'Не удалось загрузить файл'}</Alert>
       )}

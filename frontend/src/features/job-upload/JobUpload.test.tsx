@@ -49,6 +49,19 @@ describe('JobUpload', () => {
     expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ jobId: 'job-1' }))
   })
 
+  it('lets the user explicitly request a depth calculation', async () => {
+    const user = userEvent.setup()
+    const api = createApi()
+    renderUpload(api)
+    const file = new File(['{}'], 'input.geojson', { type: 'application/geo+json' })
+
+    await user.upload(screen.getByLabelText(/geojson/i), file)
+    await user.click(screen.getByRole('radio', { name: /с учётом глубины/i }))
+    await user.click(screen.getByRole('button', { name: /запустить расчёт/i }))
+
+    expect(api.createJob).toHaveBeenCalledWith(file, 'depth', expect.any(AbortSignal))
+  })
+
   it('accepts drag-and-drop and retains the file after a server error', async () => {
     const user = userEvent.setup()
     const api = createApi()
