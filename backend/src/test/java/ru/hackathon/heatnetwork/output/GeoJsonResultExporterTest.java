@@ -196,7 +196,8 @@ class GeoJsonResultExporterTest {
         Map<String, Consumer<CalculatedVariant>> cases = new LinkedHashMap<>();
         cases.put("missing summary", value -> value.summary = null);
         cases.put("missing variant ID", value -> value.variantId = " ");
-        cases.put("depth mode", value -> value.mode = Mode.DEPTH);
+        cases.put("missing depths in DEPTH", value -> value.mode = Mode.DEPTH);
+        cases.put("missing mode", value -> value.mode = null);
         cases.put("missing nodes", value -> value.nodes = null);
         cases.put("duplicate node", value -> value.nodes.add(value.nodes.get(0)));
         cases.put("duplicate edge", value -> value.edges.add(value.edges.get(0)));

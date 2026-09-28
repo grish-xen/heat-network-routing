@@ -70,8 +70,13 @@ public final class GeoJsonResultExporter implements ResultExporter {
             json.writeNumberField("diameter", edge.diameterMm);
             json.writeNumberField("length", edge.lengthM);
             json.writeStringField("laying_method", edge.layingMethod == LayingMethod.BASE ? "base" : "special");
-            json.writeNullField("depth_start");
-            json.writeNullField("depth_end");
+            if (variant.mode == Mode.DEPTH) {
+                json.writeNumberField("depth_start", edge.depthStartM);
+                json.writeNumberField("depth_end", edge.depthEndM);
+            } else {
+                json.writeNullField("depth_start");
+                json.writeNullField("depth_end");
+            }
             json.writeNumberField("cost", edge.costRub);
             json.writeEndObject(); // properties
             json.writeObjectFieldStart("geometry");

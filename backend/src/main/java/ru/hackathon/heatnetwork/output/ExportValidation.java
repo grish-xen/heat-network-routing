@@ -24,11 +24,14 @@ final class ExportValidation {
         List<PreparedVariant> prepared = new ArrayList<>();
         Set<String> ids = new HashSet<>();
         BigDecimal previousScore = null;
+        Mode mode = null;
         for (CalculatedVariant variant : variants) {
             interrupted();
             require(variant != null && text(variant.variantId), "У варианта должен быть непустой variantId.");
             require(ids.add(variant.variantId), "Повторяющийся variantId: " + variant.variantId);
-            require(variant.mode == Mode.TWO_D, "UNSUPPORTED_MODE: экспорт поддерживает только обязательный режим TWO_D.");
+            require(variant.mode != null, "Не задан режим рассчитанного варианта.");
+            require(mode == null || mode == variant.mode, "В одном экспорте нельзя смешивать TWO_D и DEPTH.");
+            mode = variant.mode;
             require(variant.nodes != null && variant.edges != null && variant.newChambers != null
                     && variant.unconnectedPointIds != null, "Списки варианта не могут быть null.");
             PreparedVariant current = prepareVariant(dataset, variant, projection);
@@ -71,6 +74,7 @@ final class ExportValidation {
         double length = 0;
         Set<String> edgeIds = new HashSet<>();
         Set<String> referenced = new HashSet<>();
+        DepthExportValidation depth = variant.mode == Mode.DEPTH ? new DepthExportValidation() : null;
         for (CalculatedEdge edge : variant.edges) {
             interrupted();
             require(edge != null && text(edge.id) && edgeIds.add(edge.id), "Некорректный или повторяющийся ID участка.");
@@ -96,7 +100,11 @@ final class ExportValidation {
             number(edge.flowTph, "flow_tph");
             number(edge.costRub, "cost");
             require(edge.diameterMm > 0 && edge.layingMethod != null, "Не заданы диаметр или способ прокладки: " + edge.id);
-            require(edge.depthStartM == null && edge.depthEndM == null, "В режиме 2D глубина должна быть null: " + edge.id);
+            if (depth == null) {
+                require(edge.depthStartM == null && edge.depthEndM == null, "В режиме 2D глубина должна быть null: " + edge.id);
+            } else {
+                depth.check(edge);
+            }
             pipeCost = pipeCost.add(edge.costRub);
             length += edge.lengthM;
             referenced.add(edge.fromNodeId);

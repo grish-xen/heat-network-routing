@@ -28,6 +28,11 @@ import ru.hackathon.heatnetwork.model.Model.NodeKind;
  */
 final class DepthProfilePlanner {
     private static final double EPSILON = 1e-9;
+    /**
+     * Transitions are planned a hair below the maximum slope, so that the lengths measured on the
+     * final cut geometry (floating point on UTM coordinates) never exceed it.
+     */
+    private static final double SLOPE_MARGIN = 1e-7;
 
     private DepthProfilePlanner() { }
 
@@ -296,8 +301,9 @@ final class DepthProfilePlanner {
         }
         gap = Math.max(0, gap);
         double ordinary = rules.ordinaryM;
-        double rampA = Math.abs(a - ordinary) / rules.maximumSlope;
-        double rampB = Math.abs(b - ordinary) / rules.maximumSlope;
+        double slope = rules.maximumSlope * (1 - SLOPE_MARGIN);
+        double rampA = Math.abs(a - ordinary) / slope;
+        double rampB = Math.abs(b - ordinary) / slope;
         List<double[]> vertices = new ArrayList<>();
         double weight;
         if (rampA + rampB <= gap + EPSILON) {
@@ -308,7 +314,7 @@ final class DepthProfilePlanner {
             weight = rules.weightedLength(a, ordinary, rampA)
                     + rules.weightedLength(ordinary, ordinary, Math.max(0, gap - rampA - rampB))
                     + rules.weightedLength(ordinary, b, rampB);
-        } else if (Math.abs(a - b) <= rules.maximumSlope * gap + EPSILON) {
+        } else if (Math.abs(a - b) <= slope * gap) {
             vertices.add(new double[] {x0, a});
             vertices.add(new double[] {x1, b});
             weight = rules.weightedLength(a, b, gap);

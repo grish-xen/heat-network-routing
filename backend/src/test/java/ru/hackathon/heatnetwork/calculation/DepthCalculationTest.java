@@ -41,6 +41,7 @@ import ru.hackathon.heatnetwork.model.Model.Node;
 import ru.hackathon.heatnetwork.model.Model.NodeKind;
 import ru.hackathon.heatnetwork.model.Model.RouteCandidate;
 import ru.hackathon.heatnetwork.model.ObjectId;
+import ru.hackathon.heatnetwork.output.GeoJsonResultExporter;
 import ru.hackathon.heatnetwork.routing.DefaultSpatialValidator;
 import ru.hackathon.heatnetwork.routing.RulesCatalog;
 
@@ -74,6 +75,14 @@ class DepthCalculationTest {
             if (Arrays.asList("flat", "road", "branch", "gas-above").contains(name)) {
                 assertEquals(0, illustrated.compareTo(variant.summary.calculatedCost),
                         () -> name + ": same cost as the fixture, got " + variant.summary.calculatedCost);
+            }
+
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+            new GeoJsonResultExporter().write(data, java.util.Collections.singletonList(variant), output);
+            for (JsonNode feature : json.readTree(output.toByteArray()).path("features")) {
+                if ("heat_network".equals(feature.path("properties").path("object_type").asText())) {
+                    assertTrue(feature.path("properties").path("depth_start").isNumber(), name + ": exported depth");
+                }
             }
         }
     }
@@ -185,7 +194,7 @@ class DepthCalculationTest {
         List<Double> ramps = variant.edges.stream().filter(e -> !e.depthStartM.equals(e.depthEndM))
                 .map(e -> e.lengthM).collect(Collectors.toList());
         assertEquals(2, ramps.size());
-        ramps.forEach(length -> assertEquals(4.0, length, SLACK, "0.4 m at slope 0.10"));
+        ramps.forEach(length -> assertEquals(4.0, length, 1e-5, "0.4 m at slope 0.10"));
     }
 
     @Test
@@ -206,7 +215,8 @@ class DepthCalculationTest {
         for (CalculatedEdge edge : variant.edges) {
             assertTrue(Double.isFinite(edge.depthStartM) && Double.isFinite(edge.depthEndM), edge.id);
             assertTrue(edge.depthStartM >= 0.7 - SLACK && edge.depthEndM >= 0.7 - SLACK, edge.id);
-            assertTrue(Math.abs(edge.depthEndM - edge.depthStartM) <= 0.10 * edge.lengthM + SLACK, "slope " + edge.id);
+            // As strict as the exporter: only floating-point noise is tolerated at the slope limit.
+            assertTrue(Math.abs(edge.depthEndM - edge.depthStartM) <= 0.10 * edge.lengthM + 1e-12, "slope " + edge.id);
             assertTrue((edge.depthStartM - 3) * (edge.depthEndM - 3) >= -SLACK, "3 m inside " + edge.id);
             if (edge.layingMethod == LayingMethod.SPECIAL) {
                 assertEquals(edge.depthStartM, edge.depthEndM, SLACK, "P3 " + edge.id);
