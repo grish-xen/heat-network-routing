@@ -35,7 +35,6 @@ public class JobController {
     @ApiResponse(responseCode = "202", description = "Файл сохранён, задача принята", content = @Content(schema = @Schema(implementation = JobView.class)))
     @ApiResponse(responseCode = "400", description = "Некорректный запрос", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "413", description = "Превышен размер файла или запроса", content = @Content(schema = @Schema(implementation = ApiError.class)))
-    @ApiResponse(responseCode = "422", description = "Режим пока не поддерживается", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "503", description = "Очередь заполнена", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "500", description = "Ошибка сохранения", content = @Content(schema = @Schema(implementation = ApiError.class)))
     public ResponseEntity<JobView> create(@RequestParam("file") MultipartFile file,

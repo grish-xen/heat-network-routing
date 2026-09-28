@@ -1,6 +1,6 @@
 # Ответы DEPTH для разработки интерфейса
 
-**Backend пока отклоняет mode=depth.** Эти файлы — fixtures, а не реальные ответы сервера. Не подставлять их автоматически при ошибке HTTP.
+**Backend принимает mode=depth.** Эти файлы остаются демонстрационными fixtures, а не снимками реальных ответов решателя. Не подставлять их автоматически при ошибке HTTP.
 
 Согласованы с [gas-below](../../synthetic/depth/gas-below/metric-case.json) и [контрактом](../../../docs/DEPTH_CONTRACT.md).
 
@@ -14,7 +14,7 @@
 | map-result.json | GET map, layer=result, variantId=variant-1; одна страница |
 | map-bounds.json | GET map/bounds?variantId=variant-1; объединённые границы |
 | job-failed.json | Другая иллюстративная задача: нет принятого кандидата; HTTP 200 со статусом FAILED |
-| unsupported-mode.json | Текущий POST mode=depth: HTTP 422; задача не создаётся |
+| unsupported-mode.json | Исторический ответ старого backend: HTTP 422; текущий сервер принимает DEPTH |
 
 Скачивание — [expected.geojson](../../synthetic/depth/gas-below/expected.geojson), Content-Type application/geo+json. map-result не содержит variant_summary. nextCursor=null означает конец; клиент продолжает поддерживать пагинацию и отмену устаревших запросов.
 

@@ -75,7 +75,6 @@ public final class JobService implements DisposableBean {
         if (!"2d".equals(mode) && !"depth".equals(mode)) {
             throw new ApiException(400, "INVALID_INPUT", "mode должен быть 2d или depth.");
         }
-        if ("depth".equals(mode)) throw new ApiException(422, "UNSUPPORTED_MODE", "Режим глубины пока не реализован.");
         if (file == null || file.isEmpty()) throw new ApiException(400, "INVALID_INPUT", "Передайте непустой файл в поле file.");
         if (file.getSize() > properties.getMaxFileBytes()) throw tooLarge();
         lifecycle.readLock().lock();
@@ -160,14 +159,19 @@ public final class JobService implements DisposableBean {
             try {
                 store.save(job.validating());
                 try (Dataset dataset = parser.parse(store.input(job.jobId))) {
-                    List<CalculatedVariant> variants = coordinator.calculate(dataset, stage -> store.save(job.running(stage)));
+                    List<ApiError> diagnostics = new java.util.ArrayList<>();
+                    ru.hackathon.heatnetwork.model.Model.Mode mode = "depth".equals(job.mode)
+                            ? ru.hackathon.heatnetwork.model.Model.Mode.DEPTH : ru.hackathon.heatnetwork.model.Model.Mode.TWO_D;
+                    List<CalculatedVariant> variants = coordinator.calculate(dataset, mode,
+                            stage -> store.save(job.running(stage)), diagnostics);
                     store.save(job.running(JobView.Stage.EXPORTING));
                     store.writeResult(job.jobId, dataset, variants, exporter);
                     store.writeMaps(job.jobId);
                     CalculationCoordinator.interrupted();
                     int missing = variants.get(0).unconnectedPointIds.size();
-                    terminal = job.succeeded(missing == 0 ? List.of() : List.of(new ApiError("ROUTE_NOT_FOUND",
-                            "В лучшем варианте не подключено точек: " + missing + ". Поиск завершён в пределах заданного бюджета.")));
+                    if (missing != 0) diagnostics.add(new ApiError("ROUTE_NOT_FOUND",
+                            "В лучшем варианте не подключено точек: " + missing + ". Поиск завершён в пределах заданного бюджета."));
+                    terminal = job.succeeded(diagnostics);
                 }
             } catch (CalculationCoordinator.NoValidVariantException exception) {
                 terminal = job.failed(exception.diagnostics);

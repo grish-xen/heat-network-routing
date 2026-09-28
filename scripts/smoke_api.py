@@ -40,10 +40,12 @@ class Client:
                 require(response.headers.get('Cache-Control') == 'no-store', f'{path}: missing no-store')
             return body
 
-    def upload(self, content):
+    def upload(self, content, mode='2d'):
         boundary = 'smoke-' + uuid.uuid4().hex
         data = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="input.geojson"\r\n'
-                'Content-Type: application/geo+json\r\n\r\n').encode() + content + f'\r\n--{boundary}--\r\n'.encode()
+                'Content-Type: application/geo+json\r\n\r\n').encode() + content + (
+                f'\r\n--{boundary}\r\nContent-Disposition: form-data; name="mode"\r\n\r\n{mode}'
+                f'\r\n--{boundary}--\r\n').encode()
         job = self.request('/api/jobs', 202, data, {'Content-Type': f'multipart/form-data; boundary={boundary}'})
         return '/api/jobs/' + urllib.parse.quote(job['jobId'], safe='')
 
@@ -102,15 +104,25 @@ def run(args, report):
     original = json.loads(content, parse_float=Decimal)
     api = Client(args.base_url, args.request_timeout)
     require(api.request('/api/health')['status'] == 'UP', 'Backend is not UP')
-    job = api.upload(content)
+    mode = getattr(args, 'mode', '2d')
+    job = api.upload(content, mode)
     report['job'] = job
     status = api.wait(job, args.timeout)
     report['diagnostics'] = status.get('diagnostics', [])
     require(status['status'] == 'SUCCEEDED' and status['stage'] == 'DONE', f'Calculation failed: {status}')
+    require(status['mode'] == mode, 'Job changed requested calculation mode')
+    report['mode'] = mode
     variants = api.request(job + '/variants')
     require(1 <= len(variants) <= 3, 'Expected one to three variants')
     download = api.request(job + '/result')
     require(download['type'] == 'FeatureCollection', 'Invalid download collection')
+    for feature in download['features']:
+        p = feature['properties']
+        if p['object_type'] == 'heat_network':
+            for key in ('depth_start', 'depth_end'):
+                require((p[key] is None) if mode == '2d' else (
+                    not isinstance(p[key], bool) and isinstance(p[key], (int, Decimal))
+                    and Decimal(p[key]).is_finite() and p[key] >= Decimal('0.7')), f'Invalid {mode} {key}')
     summaries = [f['properties'] for f in download['features'] if f['properties']['object_type'] == 'variant_summary']
     require(summaries == variants, 'Downloaded summaries differ from /variants')
     require([v['rank'] for v in variants] == list(range(1, len(variants) + 1)), 'Invalid variant ranks')
@@ -131,7 +143,7 @@ def run(args, report):
             require(len(bounds) == 4 and all(abs(a - b) <= Decimal('0.000000001') for a, b in zip(bounds, expected_bounds)), 'Bounds differ from input + result extent')
         report['variants'].append({'id': identifier, 'result_features': len(result),
                                    'unconnected_ids': variant['unconnected_oks_ids'], 'score': str(variant['score'])})
-    invalid = api.upload(b'{ broken json')
+    invalid = api.upload(b'{ broken json', mode)
     report['invalid_job'] = invalid
     rejected = api.wait(invalid, args.timeout)
     require(rejected['status'] == 'FAILED' and any(d['code'] == 'INVALID_INPUT' for d in rejected['diagnostics']), 'Malformed JSON was not rejected')
@@ -145,6 +157,7 @@ def run(args, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url', default='http://127.0.0.1:8080')
+    parser.add_argument('--mode', choices=('2d', 'depth'), default='2d')
     parser.add_argument('--input', type=Path, default=ROOT / 'test-data/synthetic/two-consumers/input.geojson')
     parser.add_argument('--timeout', type=float, default=180, help='Per-job polling deadline in seconds')
     parser.add_argument('--request-timeout', type=float, default=15)

@@ -257,6 +257,7 @@ class JobServiceTest {
         candidate.candidateId = "test";
         when(session.next()).thenReturn(Optional.of(candidate), Optional.empty());
         ru.hackathon.heatnetwork.model.Model.CalculatedVariant variant = new ru.hackathon.heatnetwork.model.Model.CalculatedVariant();
+        variant.mode = ru.hackathon.heatnetwork.model.Model.Mode.TWO_D;
         variant.summary = new ru.hackathon.heatnetwork.model.Model.Summary();
         variant.summary.score = BigDecimal.ONE;
         ru.hackathon.heatnetwork.model.Model.Evaluation evaluation = new ru.hackathon.heatnetwork.model.Model.Evaluation();

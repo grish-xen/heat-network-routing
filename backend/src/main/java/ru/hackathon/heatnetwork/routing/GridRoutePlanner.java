@@ -81,6 +81,7 @@ public final class GridRoutePlanner {
     private int candidateCounter = 0;
     private int targetCursor = 0;
     private boolean emptyCandidateEmitted = false;
+    private boolean exhaustionReported = false;
     private boolean closed = false;
     /** Target represented by the last candidate returned from next(). */
     private ObjectId lastEmittedTarget;
@@ -168,9 +169,7 @@ public final class GridRoutePlanner {
         this.dataset = dataset;
         this.catalog = catalog == null ? RulesCatalog.loadDefault() : catalog;
         this.mode = options.mode;
-        if (mode == Mode.DEPTH) {
-            throw new UnsupportedOperationException("UNSUPPORTED_MODE: DEPTH is reserved by contract 1.0");
-        }
+        if (mode == null) throw new IllegalArgumentException("Search mode is required");
         this.maxCandidates = Math.max(1, options.maxCandidates);
 
         List<InputObject> objects = new ArrayList<>();
@@ -260,6 +259,18 @@ public final class GridRoutePlanner {
             lastEmittedTarget = targetId;
             candidateCounter++;
             return Optional.of(assembleCandidate());
+        }
+        if (!exhausted.isEmpty() && !exhaustionReported) {
+            exhaustionReported = true;
+            emptyCandidateEmitted = true;
+            RouteCandidate finalCandidate = assembleCandidate();
+            ru.hackathon.heatnetwork.model.Model.Diagnostic diagnostic = new ru.hackathon.heatnetwork.model.Model.Diagnostic();
+            diagnostic.code = "SEARCH_BUDGET_EXHAUSTED";
+            diagnostic.message = "Исчерпаны ограниченные попытки планового поиска для оставшихся точек; это не доказывает невозможность подключения.";
+            diagnostic.candidateId = finalCandidate.candidateId;
+            finalCandidate.diagnostics.add(diagnostic);
+            lastEmittedTarget = null;
+            return Optional.of(finalCandidate);
         }
         if (candidateCounter == 0 && !emptyCandidateEmitted) {
             // Nothing traceable at all: emit the all-unconnected candidate once so the
