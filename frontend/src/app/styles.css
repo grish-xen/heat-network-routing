@@ -243,6 +243,34 @@ h2 {
   font-size: 0.78rem;
 }
 
+.mode-selector,
+.result-view-tabs {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.mode-selector legend { margin-bottom: 0.45rem; font-size: 0.76rem; font-weight: 700; }
+.mode-selector label { padding: 0.45rem 0.65rem; background: #f4f7f2; border: 1px solid var(--border); border-radius: 999px; font-size: 0.78rem; }
+.result-view-tabs { margin: 1rem 0; }
+.result-view-tabs button, .depth-scene-toolbar button { padding: 0.5rem 0.72rem; color: var(--text); background: #f4f7f2; border: 1px solid var(--border); border-radius: 0.5rem; font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
+.result-view-tabs [aria-selected='true'] { color: #fff; background: var(--focus); border-color: var(--focus); }
+.depth-scene, .depth-profile { width: 100%; height: 100%; min-height: 34rem; padding: 1rem; background: #e9efea; }
+.depth-scene { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 0.8rem; }
+.depth-scene-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #42544d; font-size: 0.78rem; font-weight: 700; }
+.depth-scene-canvas { min-height: 28rem; overflow: hidden; border: 1px solid rgb(19 35 31 / 12%); border-radius: 0.8rem; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 45%); }
+.depth-scene-canvas canvas { display: block; width: 100%; height: 100%; }
+.depth-profile { display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.depth-profile svg { width: 100%; height: 100%; font-size: 14px; fill: #42544d; }
+.depth-profile-axis { stroke: #94a49d; stroke-width: 1.5; }
+.depth-profile-line { fill: none; stroke: var(--new-network); stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+.depth-profile-point { fill: #fff; stroke: var(--new-network); stroke-width: 3; }
+.depth-profile-values { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 0.8rem; font-weight: 700; }
+.depth-empty { display: grid; min-height: 12rem; padding: 1rem; place-items: center; text-align: center; color: var(--text-muted); }
+
 .dropzone-icon {
   display: grid;
   width: 2.5rem;

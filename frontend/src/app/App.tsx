@@ -21,7 +21,7 @@ function ActiveJob({ api, apiMode, initialJob, onReset }: ActiveJobProps) {
   const query = useJob(api, initialJob)
   const job = query.data ?? initialJob
   if (job.status === 'SUCCEEDED' && job.stage === 'DONE') {
-    return <ResultWorkspace api={api} jobId={job.jobId} demo={apiMode === 'fixture'} onReset={onReset} />
+    return <ResultWorkspace api={api} jobId={job.jobId} mode={job.mode} demo={apiMode === 'fixture'} onReset={onReset} />
   }
   return (
     <main className="workspace" aria-label="Рабочая область">

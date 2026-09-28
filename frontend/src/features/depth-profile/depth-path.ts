@@ -50,7 +50,7 @@ function isDepthEdge(feature: MapFeature): feature is MapFeature & { readonly ge
 
 function edgeFor(feature: MapFeature): DepthPathSegment | null {
   if (!isDepthEdge(feature)) return null
-  return { feature, startNodeId: feature.properties.startNodeId, endNodeId: feature.properties.endNodeId }
+  return { feature, startNodeId: feature.properties.startNodeId!, endNodeId: feature.properties.endNodeId! }
 }
 
 export function buildDepthPaths(features: readonly MapFeature[]): readonly DepthPath[] {
@@ -79,7 +79,8 @@ export function buildDepthPaths(features: readonly MapFeature[]): readonly Depth
 }
 
 function metres(position: Position): readonly [number, number] {
-  return proj4('EPSG:4326', UTM_37N, position)
+  const point = proj4('EPSG:4326', UTM_37N, [position[0], position[1]])
+  return [point[0]!, point[1]!]
 }
 
 function distance(points: readonly (readonly [number, number])[]): number {

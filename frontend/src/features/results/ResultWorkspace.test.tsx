@@ -33,9 +33,9 @@ function api(): HeatNetworkApi {
   }
 }
 
-function renderWorkspace() {
+function renderWorkspace(mode: '2d' | 'depth' = '2d') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><ResultWorkspace api={api()} jobId="job-1" /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><ResultWorkspace api={api()} jobId="job-1" mode={mode} /></QueryClientProvider>)
 }
 
 beforeEach(() => { mapMock.unavailable = false; mapMock.render.mockReset() })
@@ -63,5 +63,13 @@ describe('ResultWorkspace', () => {
     expect(await screen.findByText(/карта недоступна без webgl2/i)).toBeVisible()
     expect(screen.getByRole('radio', { name: /вариант 1/i })).toBeEnabled()
     expect(screen.getByRole('link', { name: /скачать geojson/i })).toHaveAttribute('href', '/api/jobs/job-1/result')
+  })
+
+  it('opens a depth result in the 3D view and keeps map and profile available', async () => {
+    renderWorkspace('depth')
+
+    expect(await screen.findByRole('tab', { name: /3d-сцена/i })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: /карта/i })).toBeEnabled()
+    expect(screen.getByRole('tab', { name: /профиль/i })).toBeEnabled()
   })
 })

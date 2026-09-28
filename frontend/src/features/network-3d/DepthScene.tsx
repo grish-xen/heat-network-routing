@@ -11,7 +11,7 @@ export function DepthScene({ segments }: { readonly segments: readonly DepthScen
   useEffect(() => {
     if (!host.current) return
     try { adapter.current = createDepthSceneAdapter(host.current, segments) }
-    catch { setError('3D-сцена недоступна в этом браузере. Откройте карту или профиль.') }
+    catch { queueMicrotask(() => setError('3D-сцена недоступна в этом браузере. Откройте карту или профиль.')) }
     return () => { adapter.current?.destroy(); adapter.current = null }
   }, [segments])
   if (error) return <p className="depth-empty" role="alert">{error}</p>
