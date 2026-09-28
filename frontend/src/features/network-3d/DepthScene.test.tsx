@@ -33,6 +33,7 @@ describe('DepthScene', () => {
     render(<DepthScene segments={[segment]} />)
 
     expect(screen.getByText(/условная поверхность/i)).toBeVisible()
+    expect(screen.getByText(/3d-сцена выбранного пути/i)).toBeVisible()
     expect(screen.getByText(/расчётная оболочка трубы/i)).toBeVisible()
     expect(screen.getByText('ДУ 80')).toBeVisible()
     expect(screen.getByText(/3,0–3,4 м/i)).toBeVisible()

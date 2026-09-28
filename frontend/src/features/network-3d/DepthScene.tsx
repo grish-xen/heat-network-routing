@@ -22,7 +22,7 @@ export function DepthScene({ segments }: { readonly segments: readonly DepthScen
   const length = Math.round(last.distanceEndM - first.distanceStartM)
   if (error) return <p className="depth-empty" role="alert">{error}</p>
   return <section className="depth-scene" aria-label="3D-сцена тепловой сети">
-    <div className="depth-scene-toolbar"><span>Вертикальный масштаб ×{VERTICAL_EXAGGERATION}</span><button type="button" onClick={() => adapter.current?.resetView()}>Сбросить ракурс</button></div>
+    <div className="depth-scene-toolbar"><div><strong>3D-сцена выбранного пути</strong><span>Глубина показана вертикальными направляющими · вертикальный масштаб ×{VERTICAL_EXAGGERATION}</span></div><button type="button" onClick={() => adapter.current?.resetView()}>Сбросить ракурс</button></div>
     <div className="depth-scene-canvas" ref={host} />
     <aside className="depth-scene-info" aria-label="Свойства выбранного участка">
       <div className="depth-scene-legend"><span><i className="surface-swatch" />Условная поверхность</span><span><i className="pipe-swatch" />Расчётная оболочка трубы</span></div>
