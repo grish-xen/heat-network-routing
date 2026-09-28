@@ -1,5 +1,7 @@
 # Контракты модулей — версия 1.0
 
+ResultExporter принимает готовые TWO_D или DEPTH-варианты одного режима. Глубины DEPTH сохраняются без пересчёта; проверки перед записью — [OUTPUT_MODULE.md](OUTPUT_MODULE.md). Сигнатуры не менялись. Маршрутизация, калькулятор и HTTP-приём DEPTH ещё требуют реализации.
+
 Подготовлено дополнение [DEPTH_CONTRACT.md](DEPTH_CONTRACT.md): глубинный профиль строит №3 после подбора ДУ, окончательный граф проверяет №2, API/экспорт обеспечивает №1, визуализацию — №4. Сигнатуры остаются прежними. Это соглашение для разработки; DEPTH пока возвращает UNSUPPORTED_MODE.
 
 Сигнатуры уже находятся в Java и проверяются общей сборкой. Реализации должны реализовать эти интерфейсы, а не создавать альтернативные типы с тем же смыслом.
@@ -13,7 +15,7 @@
 | `output.ResultExporter` | Dataset + до трёх рассчитанных вариантов одного режима, уже отсортированных → поток GeoJSON | 1 |
 | HTTP API | Загрузка, статусы, варианты, карта, скачивание по `contracts/openapi.json` | 1 и 4 |
 
-`InputParser` реализован классом `GeoJsonInputParser`; возвращается временный дисковый Dataset. Интеграция — [INPUT_MODULE.md](INPUT_MODULE.md). `ResultExporter` реализован классом `GeoJsonResultExporter` для 2D — [OUTPUT_MODULE.md](OUTPUT_MODULE.md). `VariantCalculator` реализован классом `DefaultVariantCalculator` для 2D — [CALCULATION_MODULE.md](CALCULATION_MODULE.md). Маршрутизатор и пространственные проверки — `GridRoutePlanner` и `DefaultSpatialValidator`. Общий контракт 1.0 не менялся; в каталог добавлен справочный `profileWidthM` для газопровода и кабеля.
+`InputParser` реализован классом `GeoJsonInputParser`; возвращается временный дисковый Dataset. Интеграция — [INPUT_MODULE.md](INPUT_MODULE.md). `ResultExporter` реализован классом `GeoJsonResultExporter` для TWO_D и готовых DEPTH-профилей — [OUTPUT_MODULE.md](OUTPUT_MODULE.md). `VariantCalculator` реализован классом `DefaultVariantCalculator` для 2D — [CALCULATION_MODULE.md](CALCULATION_MODULE.md). Маршрутизатор и пространственные проверки — `GridRoutePlanner` и `DefaultSpatialValidator`. Общий контракт 1.0 не менялся; в каталог добавлен справочный `profileWidthM` для газопровода и кабеля.
 
 ## Общий запуск
 
