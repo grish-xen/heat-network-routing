@@ -30,7 +30,13 @@ public final class CalculationCoordinator {
     @FunctionalInterface interface Progress { void stage(JobView.Stage stage) throws IOException; }
 
     List<CalculatedVariant> calculate(Dataset dataset, Progress progress) throws IOException {
+        return calculate(dataset, Mode.TWO_D, progress);
+    }
+
+    // Internal integration entry point; HTTP admission remains gated in JobService.
+    List<CalculatedVariant> calculate(Dataset dataset, Mode mode, Progress progress) throws IOException {
         SearchOptions options = new SearchOptions();
+        options.mode = Objects.requireNonNull(mode, "mode");
         options.maxCandidates = properties.getMaxCandidates();
         options.seed = properties.getSearchSeed();
         List<Choice> best = new ArrayList<>();
@@ -48,7 +54,7 @@ public final class CalculationCoordinator {
                 interrupted();
                 if (next.isEmpty()) break;
                 progress.stage(JobView.Stage.CALCULATING);
-                Evaluation evaluation = calculator.evaluate(dataset, next.get(), Mode.TWO_D);
+                Evaluation evaluation = calculator.evaluate(dataset, next.get(), options.mode);
                 interrupted();
                 session.feedback(evaluation);
                 if (!evaluation.accepted()) {
@@ -58,6 +64,9 @@ public final class CalculationCoordinator {
                     continue;
                 }
                 CalculatedVariant variant = evaluation.variant;
+                if (variant.mode != options.mode) {
+                    throw new IllegalStateException("Calculated variant mode differs from requested mode");
+                }
                 Set<ObjectId> missing = new HashSet<>(variant.unconnectedPointIds);
                 if (coverage.stream().anyMatch(old -> missing.size() > old.size() && missing.containsAll(old))) continue;
                 coverage.removeIf(old -> old.size() > missing.size() && old.containsAll(missing));
@@ -101,9 +110,10 @@ public final class CalculationCoordinator {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Calculation interrupted");
     }
 
-    /** Ignores generated IDs and list order, compares geometry at the shared 1 mm tolerance. */
+    /** Ignores generated IDs and list order; rounds XY to mm but preserves exact endpoint depths. */
     static String signature(CalculatedVariant variant) throws InterruptedIOException {
         List<String> parts = new ArrayList<>();
+        parts.add("mode:" + variant.mode);
         Map<String, String> nodes = new HashMap<>();
         for (Node node : variant.nodes) {
             String key = node.kind + ":" + point(node.geometry.getCoordinate()) + ":" + id(node.inputObjectId);
@@ -117,6 +127,10 @@ public final class CalculationCoordinator {
             update(digest, nodes.get(edge.toNodeId));
             update(digest, edge.diameterMm + ":" + edge.flowTph.stripTrailingZeros().toPlainString()
                     + ":" + edge.layingMethod + ":" + edge.specialCoefficient.stripTrailingZeros().toPlainString());
+            // Depths belong to the directed edge, not to an unordered set of levels.
+            // The joint continuity tolerance is not a profile deduplication tolerance.
+            update(digest, "depthStart:" + edge.depthStartM);
+            update(digest, "depthEnd:" + edge.depthEndM);
             for (int i = 0; i < edge.geometry.getNumPoints(); i++) {
                 if ((i & 1023) == 0) interrupted();
                 update(digest, point(edge.geometry.getCoordinateN(i)));
