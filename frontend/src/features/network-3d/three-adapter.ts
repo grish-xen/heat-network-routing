@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { DepthSceneSegment } from '../depth-profile/depth-path'
 
 export interface SceneObjectDescriptor {
-  readonly kind: 'surface' | 'pipe'
+  readonly kind: 'surface' | 'pipe' | 'depth-guide'
   readonly z: number
   readonly widthM?: number
   readonly heightM?: number
@@ -14,8 +14,9 @@ export interface SceneObjectDescriptor {
 
 export function sceneObjectDescriptors(segments: readonly DepthSceneSegment[]): readonly SceneObjectDescriptor[] {
   return [
-    { kind: 'surface', z: 0, opacity: 0.24 },
+    { kind: 'surface', z: 0, opacity: 0.1 },
     ...segments.map((segment) => ({ kind: 'pipe' as const, z: segment.start.z, widthM: segment.widthM, heightM: segment.heightM * 4, color: '#e9582f' })),
+    ...segments.flatMap((segment) => [{ kind: 'depth-guide' as const, z: segment.start.z }, { kind: 'depth-guide' as const, z: segment.end.z }]),
   ]
 }
 
@@ -49,7 +50,7 @@ export function cameraFrame(points: readonly { readonly x: number; readonly y: n
   const target = box.getCenter(new THREE.Vector3())
   const size = box.getSize(new THREE.Vector3())
   const radius = Math.max(size.x / Math.max(aspect, 0.1), size.y, size.z, 20) / 2
-  const distance = radius / Math.tan(THREE.MathUtils.degToRad(42) / 2) * 1.35
+  const distance = radius / Math.tan(THREE.MathUtils.degToRad(32) / 2) * 0.9
   return { target, position: target.clone().add(new THREE.Vector3(0, -distance, distance)) }
 }
 
@@ -69,7 +70,7 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
   renderer.setClearColor('#e9efea')
   container.replaceChildren(renderer.domElement)
   const scene = new THREE.Scene()
-  const camera = new THREE.PerspectiveCamera(42, (container.clientWidth || 640) / (container.clientHeight || 420), 0.1, 5000)
+  const camera = new THREE.PerspectiveCamera(32, (container.clientWidth || 640) / (container.clientHeight || 420), 0.1, 5000)
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   const bounds = segments.flatMap((segment) => [segment.start, segment.end])
@@ -82,15 +83,23 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
   }
   resetView()
   scene.add(new THREE.HemisphereLight('#ffffff', '#71877d', 2.1), new THREE.DirectionalLight('#ffffff', 1.4))
-  const surface = new THREE.Mesh(new THREE.PlaneGeometry(size * 3, size * 3), new THREE.MeshStandardMaterial({ color: '#d8e5d4', roughness: 0.95, transparent: true, opacity: 0.24, depthWrite: false }))
+  const surface = new THREE.Mesh(new THREE.PlaneGeometry(size * 2.2, size * 2.2), new THREE.MeshStandardMaterial({ color: '#d8e5d4', roughness: 0.95, transparent: true, opacity: 0.1, depthWrite: false }))
   surface.receiveShadow = true
   scene.add(surface)
   for (const segment of segments) {
     const mesh = new THREE.Mesh(
       buildEnvelopeGeometry(segment),
-      new THREE.MeshStandardMaterial({ color: '#e9582f', roughness: 0.45 }),
+      new THREE.MeshStandardMaterial({ color: '#f0643b', emissive: '#7d2d18', emissiveIntensity: 0.28, roughness: 0.36 }),
     )
     scene.add(mesh)
+    for (const point of [segment.start, segment.end]) {
+      const guide = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(point.x, point.y, 0), new THREE.Vector3(point.x, point.y, point.z)]),
+        new THREE.LineDashedMaterial({ color: '#4f7165', dashSize: 1.2, gapSize: 0.8, transparent: true, opacity: 0.7 }),
+      )
+      guide.computeLineDistances()
+      scene.add(guide)
+    }
   }
   let frame = 0
   const render = () => { controls.update(); renderer.render(scene, camera); frame = requestAnimationFrame(render) }
