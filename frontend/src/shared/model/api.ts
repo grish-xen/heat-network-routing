@@ -76,8 +76,12 @@ export interface MapFeatureProperties {
   readonly id: ObjectId
   readonly objectType: MapObjectType
   readonly variantId?: ObjectId
+  readonly startNodeId?: ObjectId
+  readonly endNodeId?: ObjectId
   readonly diameter?: number
   readonly flowTph?: number
+  readonly depthStart?: number
+  readonly depthEnd?: number
   readonly restrictionType?: string
   readonly cost?: number
   readonly length?: number

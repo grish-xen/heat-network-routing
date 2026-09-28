@@ -96,6 +96,15 @@ function optionalNumber(value: unknown, path: string): number | undefined {
   return value === undefined ? undefined : expectFiniteNumber(value, path)
 }
 
+function optionalNonNegativeNumber(value: unknown, path: string): number | undefined {
+  if (value === null) return undefined
+  const number = optionalNumber(value, path)
+  if (number !== undefined && number < 0) {
+    throw new ResponseContractError(`${path}: ожидается неотрицательное число`)
+  }
+  return number
+}
+
 function optionalInteger(value: unknown, path: string): number | undefined {
   return value === undefined ? undefined : expectInteger(value, path)
 }
@@ -271,12 +280,24 @@ function parseMapFeature(value: unknown, path: string): MapFeature {
       ...(properties.variant_id === undefined
         ? {}
         : { variantId: expectObjectId(properties.variant_id, `${path}.properties.variant_id`) }),
+      ...(properties.start_node_id === undefined
+        ? {}
+        : { startNodeId: expectObjectId(properties.start_node_id, `${path}.properties.start_node_id`) }),
+      ...(properties.end_node_id === undefined
+        ? {}
+        : { endNodeId: expectObjectId(properties.end_node_id, `${path}.properties.end_node_id`) }),
       ...(optionalInteger(properties.diameter, `${path}.properties.diameter`) === undefined
         ? {}
         : { diameter: optionalInteger(properties.diameter, `${path}.properties.diameter`) }),
       ...(optionalNumber(properties.flow_tph, `${path}.properties.flow_tph`) === undefined
         ? {}
         : { flowTph: optionalNumber(properties.flow_tph, `${path}.properties.flow_tph`) }),
+      ...(optionalNonNegativeNumber(properties.depth_start, `${path}.properties.depth_start`) === undefined
+        ? {}
+        : { depthStart: optionalNonNegativeNumber(properties.depth_start, `${path}.properties.depth_start`) }),
+      ...(optionalNonNegativeNumber(properties.depth_end, `${path}.properties.depth_end`) === undefined
+        ? {}
+        : { depthEnd: optionalNonNegativeNumber(properties.depth_end, `${path}.properties.depth_end`) }),
       ...(optionalString(properties.restriction_type, `${path}.properties.restriction_type`) === undefined
         ? {}
         : { restrictionType: optionalString(properties.restriction_type, `${path}.properties.restriction_type`) }),

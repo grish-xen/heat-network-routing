@@ -41,6 +41,34 @@ describe('lossless API parsing', () => {
     expect(page.features[0]?.geometry.type).toBe('Point')
   })
 
+  it('parses depth endpoint properties without losing a numeric node ID', () => {
+    const page = parseMapPageText(
+      '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[37.6,55.7],[37.61,55.71]]},"properties":{"id":"edge-1","object_type":"heat_network","start_node_id":9007199254740993,"end_node_id":"consumer-1","depth_start":3,"depth_end":3.4}}],"nextCursor":null}',
+    )
+
+    expect(page.features[0]?.properties).toMatchObject({
+      startNodeId: { kind: 'number', value: '9007199254740993' },
+      endNodeId: { kind: 'string', value: 'consumer-1' },
+      depthStart: 3,
+      depthEnd: 3.4,
+    })
+  })
+
+  it('rejects a non-numeric depth field', () => {
+    expect(() => parseMapPageText(
+      '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[37.6,55.7],[37.61,55.71]]},"properties":{"id":"edge-1","object_type":"heat_network","depth_start":"deep"}}],"nextCursor":null}',
+    )).toThrow(/depth_start.*число/i)
+  })
+
+  it('keeps null 2D depth fields out of the typed feature', () => {
+    const page = parseMapPageText(
+      '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[[37.6,55.7],[37.61,55.71]]},"properties":{"id":"edge-1","object_type":"heat_network","depth_start":null,"depth_end":null}}],"nextCursor":null}',
+    )
+
+    expect(page.features[0]?.properties).not.toHaveProperty('depthStart')
+    expect(page.features[0]?.properties).not.toHaveProperty('depthEnd')
+  })
+
   it('parses nullable WGS84 map bounds and rejects inverted bounds', () => {
     expect(parseMapBoundsText('{"bbox":[37.4,55.6,37.5,55.7]}')).toEqual([37.4, 55.6, 37.5, 55.7])
     expect(parseMapBoundsText('{"bbox":null}')).toBeNull()
