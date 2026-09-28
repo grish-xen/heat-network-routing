@@ -48,29 +48,39 @@ import ru.hackathon.heatnetwork.routing.RulesCatalog.RestrictionRule;
 import ru.hackathon.heatnetwork.routing.SpatialValidator;
 
 /**
- * Module 3: engineering calculation of a route candidate in the mandatory 2D mode.
+ * Module 3: engineering calculation of a route candidate in the 2D and depth modes.
  *
  * <p>Steps: structural check of the candidate tree; downstream flows; diameters by flow,
- * maximum length and monotonicity; special passes with technical nodes; chamber
- * adjacencies and the 10 m rule; clearances to special-pass objects outside their
- * crossings; costs, penalty and score; final SpatialValidator check. A rejected
- * candidate returns diagnostics and no variant. Unexpected failures are thrown, never
- * turned into an unconnected result.</p>
+ * maximum length and monotonicity; special passes with technical nodes; in the depth mode the
+ * vertical profile ({@link DepthProfilePlanner}) and extra cuts where the slope changes or the
+ * profile crosses 3 m; chamber adjacencies and the 10 m rule; clearances to special-pass objects
+ * outside their crossings; costs with Kспец and Kгл, penalty and score; final SpatialValidator
+ * check. A rejected candidate returns diagnostics and no variant. Unexpected failures are thrown,
+ * never turned into an unconnected result.</p>
  */
 public final class DefaultVariantCalculator implements VariantCalculator {
     /** Team tolerance for coincident geometry, metres; it never reduces normative clearances. */
     static final double TOLERANCE_M = 0.001;
+    /** Output depths are rounded to this many decimal places (arithmetic tolerance 1e-6 m of the contract). */
+    private static final int DEPTH_SCALE = 6;
     private static final int SCORE_SCALE = 10;
     private static final String HEAT_NETWORK = "heat_network";
     private static final double DEPARTURE_STEP_M = 0.05;
 
     private final GeometryFactory geometry = new GeometryFactory(new PrecisionModel(), Model.METRIC_SRID);
     private final RulesCatalog catalog;
+    private final DepthRules depth;
     private final SpatialValidator validator;
     private final double searchMarginM;
 
     public DefaultVariantCalculator(RulesCatalog catalog, SpatialValidator validator) {
+        this(catalog, RulesCatalog.loadDepth(), validator);
+    }
+
+    public DefaultVariantCalculator(RulesCatalog catalog, RulesCatalog.DepthCatalog depthCatalog,
+                                    SpatialValidator validator) {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
+        this.depth = new DepthRules(Objects.requireNonNull(depthCatalog, "depthCatalog"));
         this.validator = Objects.requireNonNull(validator, "validator");
         double margin = 0;
         for (RestrictionRule rule : catalog.restrictionRules()) {
@@ -88,10 +98,10 @@ public final class DefaultVariantCalculator implements VariantCalculator {
         Evaluation evaluation = new Evaluation();
         evaluation.candidateId = candidate.candidateId;
         try {
-            if (mode != Mode.TWO_D) {
-                throw Rejection.of("UNSUPPORTED_MODE", "Режим с глубиной не реализован; доступен только 2D.", null, null);
+            if (mode != Mode.TWO_D && mode != Mode.DEPTH) {
+                throw Rejection.of("UNSUPPORTED_MODE", "Не указан поддерживаемый режим расчёта.", null, null);
             }
-            CalculatedVariant variant = calculate(dataset, candidate);
+            CalculatedVariant variant = calculate(dataset, candidate, mode);
             List<Diagnostic> spatial = validator.validate(dataset, variant);
             Rejection.throwIfAny(spatial);
             evaluation.variant = variant;
@@ -104,7 +114,7 @@ public final class DefaultVariantCalculator implements VariantCalculator {
         return evaluation;
     }
 
-    private CalculatedVariant calculate(Dataset dataset, RouteCandidate candidate) throws Rejection {
+    private CalculatedVariant calculate(Dataset dataset, RouteCandidate candidate, Mode mode) throws Rejection {
         CandidateTree tree = CandidateTree.build(dataset, candidate, TOLERANCE_M);
         Map<String, Polyline> lines = new HashMap<>();
         Map<String, Double> lengths = new HashMap<>();
@@ -117,7 +127,7 @@ public final class DefaultVariantCalculator implements VariantCalculator {
 
         CalculatedVariant variant = new CalculatedVariant();
         variant.variantId = candidate.candidateId;
-        variant.mode = Mode.TWO_D;
+        variant.mode = mode;
         Set<String> usedIds = new HashSet<>();
         Map<String, Node> finalNodes = new LinkedHashMap<>();
         for (Node node : tree.nodes.values()) {
@@ -139,14 +149,15 @@ public final class DefaultVariantCalculator implements VariantCalculator {
         }
         variant.unconnectedPointIds.addAll(tree.unconnectedFlow.keySet());
 
-        Map<CalculatedEdge, Piece> pieceOf = new HashMap<>();
-        Map<CalculatedEdge, List<Obstacle>> nearOf = new HashMap<>();
+        Map<String, List<Piece>> piecesOf = new HashMap<>();
+        Map<String, List<Obstacle>> nearOfEdge = new HashMap<>();
         Map<ObjectId, List<Coordinate>> permittedContacts = new HashMap<>();
         for (Edge edge : candidate.edges) {
             Polyline line = lines.get(edge.id);
             List<Obstacle> near = specialObstacles(dataset, line);
             Coordinate rootPoint = tree.isRoot(edge.fromNodeId) ? tree.positions.get(edge.fromNodeId) : null;
-            List<Piece> pieces = SpecialPasses.split(edge.id, line, near, rootPoint, TOLERANCE_M);
+            piecesOf.put(edge.id, SpecialPasses.split(edge.id, line, near, rootPoint, TOLERANCE_M));
+            nearOfEdge.put(edge.id, near);
             if (rootPoint != null) {
                 Point root = geometry.createPoint(rootPoint);
                 for (Obstacle obstacle : near) {
@@ -155,25 +166,40 @@ public final class DefaultVariantCalculator implements VariantCalculator {
                     }
                 }
             }
+        }
+        Map<String, List<double[]>> profiles = mode == Mode.DEPTH
+                ? profiles(tree, lines, piecesOf, diameters) : new HashMap<>();
+
+        Map<CalculatedEdge, Piece> pieceOf = new HashMap<>();
+        Map<CalculatedEdge, List<Obstacle>> nearOf = new HashMap<>();
+        for (Edge edge : candidate.edges) {
+            Polyline line = lines.get(edge.id);
+            List<Piece> pieces = piecesOf.get(edge.id);
+            List<double[]> profile = profiles.get(edge.id);
+            List<Double> cuts = cuts(line.length, pieces, profile);
             String from = edge.fromNodeId;
-            for (int i = 0; i < pieces.size(); i++) {
-                Piece piece = pieces.get(i);
+            for (int i = 0; i + 1 < cuts.size(); i++) {
+                double start = cuts.get(i);
+                double end = cuts.get(i + 1);
+                Piece piece = pieceAt(pieces, (start + end) / 2);
                 String to = edge.toNodeId;
-                if (i + 1 < pieces.size()) {
+                if (i + 2 < cuts.size()) {
                     Node technical = new Node();
                     technical.id = unique(edge.id + "/n" + (i + 1), usedIds);
                     technical.kind = NodeKind.TECHNICAL_NODE;
-                    technical.geometry = geometry.createPoint(line.pointAt(piece.end));
+                    technical.geometry = geometry.createPoint(line.pointAt(end));
                     finalNodes.put(technical.id, technical);
                     variant.nodes.add(technical);
                     to = technical.id;
                 }
-                String id = pieces.size() == 1 ? edge.id : unique(edge.id + "/" + (i + 1), usedIds);
-                CalculatedEdge calculated = calculatedEdge(id, from, to, line, piece, diameters.get(edge.id),
-                        tree.downstreamFlow.get(edge.toNodeId));
+                String id = cuts.size() == 2 ? edge.id : unique(edge.id + "/" + (i + 1), usedIds);
+                Double depthStart = profile == null ? null : depthAt(profile, start);
+                Double depthEnd = profile == null ? null : depthAt(profile, end);
+                CalculatedEdge calculated = calculatedEdge(id, from, to, line, start, end, piece,
+                        diameters.get(edge.id), tree.downstreamFlow.get(edge.toNodeId), depthStart, depthEnd);
                 variant.edges.add(calculated);
                 pieceOf.put(calculated, piece);
-                nearOf.put(calculated, near);
+                nearOf.put(calculated, nearOfEdge.get(edge.id));
                 for (ObjectId crossed : piece.crossed.keySet()) {
                     List<Coordinate> contacts = permittedContacts.computeIfAbsent(crossed, key -> new ArrayList<>());
                     contacts.add(calculated.geometry.getCoordinateN(0));
@@ -188,32 +214,180 @@ public final class DefaultVariantCalculator implements VariantCalculator {
         return variant;
     }
 
-    private CalculatedEdge calculatedEdge(String id, String from, String to, Polyline line, Piece piece,
-                                          int diameterMm, BigDecimal flow) {
+    /**
+     * Depth mode: blocks of constant depth on every edge (runs of special pieces widened to the zone
+     * where the envelopes overlap in plan) and the jointly planned profile of the tree.
+     */
+    private Map<String, List<double[]>> profiles(CandidateTree tree, Map<String, Polyline> lines,
+                                                 Map<String, List<Piece>> piecesOf, Map<String, Integer> diameters)
+            throws Rejection {
+        Map<String, DepthProfilePlanner.EdgeInput> inputs = new HashMap<>();
+        for (Edge edge : tree.candidate.edges) {
+            int diameter = diameters.get(edge.id);
+            Polyline line = lines.get(edge.id);
+            inputs.put(edge.id, new DepthProfilePlanner.EdgeInput(line.length,
+                    blocks(edge.id, line, piecesOf.get(edge.id), diameter),
+                    catalog.row(diameter).newCostRubPerM));
+        }
+        return DepthProfilePlanner.plan(tree, inputs, depth);
+    }
+
+    private List<DepthProfilePlanner.Block> blocks(String edgeId, Polyline line, List<Piece> pieces, int diameterMm)
+            throws Rejection {
+        double halfWidth = catalog.halfWidthM(diameterMm);
+        double height = catalog.row(diameterMm).heightM;
+        List<double[]> spans = new ArrayList<>();
+        List<Map<ObjectId, Obstacle>> sets = new ArrayList<>();
+        for (Piece piece : pieces) {
+            if (piece.crossed.isEmpty()) {
+                continue;
+            }
+            int last = spans.size() - 1;
+            if (last >= 0 && piece.start - spans.get(last)[1] <= TOLERANCE_M) {
+                spans.get(last)[1] = piece.end;
+                sets.get(last).putAll(piece.crossed);
+            } else {
+                spans.add(new double[] {piece.start, piece.end});
+                sets.add(new LinkedHashMap<>(piece.crossed));
+            }
+        }
+        for (int i = 0; i < spans.size(); i++) {
+            double[] span = spans.get(i);
+            for (Obstacle obstacle : sets.get(i).values()) {
+                Geometry overlap = obstacle.geometry.buffer(halfWidth + obstacle.ownHalfWidthM, 16);
+                for (double[] zone : SpecialPasses.crossings(line, overlap, TOLERANCE_M)) {
+                    if (zone[1] >= span[0] - TOLERANCE_M && zone[0] <= span[1] + TOLERANCE_M) {
+                        span[0] = Math.min(span[0], zone[0]);
+                        span[1] = Math.max(span[1], zone[1]);
+                    }
+                }
+            }
+            if (span[0] < -TOLERANCE_M || span[1] > line.length + TOLERANCE_M) {
+                throw Rejection.of("DEPTH_PROFILE_NOT_FOUND", "Зона перекрытия габаритов на пересечении выходит за"
+                        + " участок " + edgeId + "; постоянную глубину прохода (P3) нельзя обеспечить.", null, edgeId);
+            }
+            span[0] = Math.max(0, span[0]);
+            span[1] = Math.min(line.length, span[1]);
+        }
+        List<DepthProfilePlanner.Block> blocks = new ArrayList<>();
+        for (int i = 0; i < spans.size(); i++) {
+            double start = spans.get(i)[0];
+            double end = spans.get(i)[1];
+            Map<ObjectId, Obstacle> crossed = new LinkedHashMap<>(sets.get(i));
+            while (i + 1 < spans.size() && spans.get(i + 1)[0] <= end + TOLERANCE_M) {
+                i++;
+                end = Math.max(end, spans.get(i)[1]);
+                crossed.putAll(sets.get(i));
+            }
+            List<double[]> admissible = new ArrayList<>();
+            admissible.add(new double[] {depth.minimumM, Double.POSITIVE_INFINITY});
+            for (Obstacle obstacle : crossed.values()) {
+                admissible = DepthRules.intersect(admissible, depth.admissible(obstacle, height));
+            }
+            if (admissible.isEmpty()) {
+                throw Rejection.of("DEPTH_PROFILE_NOT_FOUND", "На участке " + edgeId + " нет глубины, одновременно"
+                        + " допустимой для всех пересекаемых объектов.", crossed.keySet().iterator().next(), edgeId);
+            }
+            double weight = 0;
+            for (Piece piece : pieces) {
+                double overlap = Math.min(end, piece.end) - Math.max(start, piece.start);
+                if (overlap > 0) {
+                    weight += overlap * specialCoefficient(piece).doubleValue();
+                }
+            }
+            blocks.add(new DepthProfilePlanner.Block(start, end, admissible, weight));
+        }
+        return blocks;
+    }
+
+    /** Positions where the edge is cut: special-pass boundaries and, in the depth mode, profile vertices. */
+    private static List<Double> cuts(double length, List<Piece> pieces, List<double[]> profile) {
+        List<Double> raw = new ArrayList<>();
+        for (Piece piece : pieces) {
+            raw.add(piece.start);
+            raw.add(piece.end);
+        }
+        if (profile != null) {
+            for (double[] vertex : profile) {
+                raw.add(vertex[0]);
+            }
+        }
+        raw.sort(Double::compare);
+        List<Double> result = new ArrayList<>();
+        result.add(0.0);
+        for (double cut : raw) {
+            if (cut - result.get(result.size() - 1) > TOLERANCE_M && length - cut > TOLERANCE_M) {
+                result.add(cut);
+            }
+        }
+        result.add(length);
+        return result;
+    }
+
+    private static Piece pieceAt(List<Piece> pieces, double position) {
+        for (Piece piece : pieces) {
+            if (position >= piece.start && position <= piece.end) {
+                return piece;
+            }
+        }
+        return pieces.get(pieces.size() - 1);
+    }
+
+    /** Linear interpolation by accumulated horizontal length, rounded to the contract's arithmetic tolerance. */
+    static double depthAt(List<double[]> profile, double position) {
+        double value = profile.get(profile.size() - 1)[1];
+        for (int i = 0; i + 1 < profile.size(); i++) {
+            double[] a = profile.get(i);
+            double[] b = profile.get(i + 1);
+            if (position <= b[0]) {
+                double span = b[0] - a[0];
+                value = span <= 0 ? b[1] : a[1] + (b[1] - a[1]) * Math.max(0, position - a[0]) / span;
+                break;
+            }
+        }
+        return BigDecimal.valueOf(value).setScale(DEPTH_SCALE, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private CalculatedEdge calculatedEdge(String id, String from, String to, Polyline line, double start, double end,
+                                          Piece piece, int diameterMm, BigDecimal flow, Double depthStart,
+                                          Double depthEnd) {
         CalculatedEdge edge = new CalculatedEdge();
         edge.id = id;
         edge.fromNodeId = from;
         edge.toNodeId = to;
-        edge.geometry = geometry.createLineString(line.extract(piece.start, piece.end, TOLERANCE_M));
+        edge.geometry = geometry.createLineString(line.extract(start, end, TOLERANCE_M));
         edge.flowTph = flow;
         edge.diameterMm = diameterMm;
         edge.lengthM = edge.geometry.getLength();
-        edge.depthStartM = null;
-        edge.depthEndM = null;
+        edge.depthStartM = depthStart;
+        edge.depthEndM = depthEnd;
+        for (Obstacle obstacle : piece.crossed.values()) {
+            edge.crossedObjectIds.add(obstacle.id);
+        }
+        edge.layingMethod = piece.crossed.isEmpty() ? LayingMethod.BASE : LayingMethod.SPECIAL;
+        edge.specialCoefficient = specialCoefficient(piece);
+        BigDecimal cost = BigDecimal.valueOf(edge.lengthM)
+                .multiply(BigDecimal.valueOf(catalog.row(diameterMm).newCostRubPerM))
+                .multiply(edge.specialCoefficient);
+        if (depthStart != null) {
+            // Uniform slope: the mean of Kгл at both ends; the cut at 3 m keeps each part linear in Kгл.
+            cost = cost.multiply(depth.kDecimal(depthStart).add(depth.kDecimal(depthEnd)))
+                    .divide(BigDecimal.valueOf(2));
+        }
+        edge.costRub = money(cost);
+        return edge;
+    }
+
+    /** The largest Kспец of the crossed objects; the coefficients are never added or multiplied. */
+    private static BigDecimal specialCoefficient(Piece piece) {
         BigDecimal coefficient = BigDecimal.ONE;
         for (Obstacle obstacle : piece.crossed.values()) {
             BigDecimal value = BigDecimal.valueOf(obstacle.rule.specialCoefficient);
             if (value.compareTo(coefficient) > 0) {
                 coefficient = value;
             }
-            edge.crossedObjectIds.add(obstacle.id);
         }
-        edge.layingMethod = piece.crossed.isEmpty() ? LayingMethod.BASE : LayingMethod.SPECIAL;
-        edge.specialCoefficient = coefficient;
-        edge.costRub = money(BigDecimal.valueOf(edge.lengthM)
-                .multiply(BigDecimal.valueOf(catalog.row(diameterMm).newCostRubPerM))
-                .multiply(coefficient));
-        return edge;
+        return coefficient;
     }
 
     /** Road, tram, gas, power cable and existing heat network objects near the edge. */
@@ -235,13 +409,14 @@ public final class DefaultVariantCalculator implements VariantCalculator {
                     RestrictionRule rule = catalog.rule(object.restrictionType);
                     if (rule != null && "special".equals(rule.crossing)) {
                         double half = rule.profileWidthM == null ? 0 : rule.profileWidthM / 2;
-                        result.add(new Obstacle(object.id, rule.type, object.geometry, rule, half));
+                        result.add(new Obstacle(object.id, rule.type, object.geometry, rule, half, 0));
                     }
                 } else if (object.type == InputType.HEAT_NETWORK && object.geometry instanceof LineString) {
                     RestrictionRule rule = catalog.rule(HEAT_NETWORK);
                     if (rule != null) {
-                        double half = profileRow(object.diameterMm).widthM / 2;
-                        result.add(new Obstacle(object.id, HEAT_NETWORK, object.geometry, rule, half));
+                        DiameterRow profile = profileRow(object.diameterMm);
+                        result.add(new Obstacle(object.id, HEAT_NETWORK, object.geometry, rule,
+                                profile.widthM / 2, profile.heightM));
                     }
                 }
             }

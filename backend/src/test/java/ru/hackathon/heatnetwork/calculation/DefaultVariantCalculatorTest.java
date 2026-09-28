@@ -365,14 +365,6 @@ class DefaultVariantCalculatorTest {
     }
 
     @Test
-    void depthModeIsNotReportedAs2d() {
-        Scene scene = baseScene().point(id(1), 3, xy(100, 0));
-        RouteCandidate candidate = new CandidateBuilder("depth").unconnected(id(1)).build();
-
-        assertRejected(calculator.evaluate(scene, candidate, Mode.DEPTH), "UNSUPPORTED_MODE");
-    }
-
-    @Test
     void candidateIsNotModified() {
         Scene scene = baseScene().point(id(1), 10, xy(100, 0)).restriction("road", "road", rectangle(40, -30, 50, 30));
         RouteCandidate candidate = new CandidateBuilder("immutable")

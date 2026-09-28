@@ -34,13 +34,17 @@ final class SpecialPasses {
         final RestrictionRule rule;
         /** Half of the object's own design profile, 0 when the table gives none. */
         final double ownHalfWidthM;
+        /** Height of the object's own design profile where table 1 gives it (existing heat network), else 0. */
+        final double ownHeightM;
 
-        Obstacle(ObjectId id, String type, Geometry geometry, RestrictionRule rule, double ownHalfWidthM) {
+        Obstacle(ObjectId id, String type, Geometry geometry, RestrictionRule rule, double ownHalfWidthM,
+                 double ownHeightM) {
             this.id = id;
             this.type = type;
             this.geometry = geometry;
             this.rule = rule;
             this.ownHalfWidthM = ownHalfWidthM;
+            this.ownHeightM = ownHeightM;
         }
     }
 
