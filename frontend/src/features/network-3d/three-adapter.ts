@@ -24,6 +24,35 @@ export interface DepthSceneAdapter {
   destroy(): void
 }
 
+export function buildEnvelopeGeometry(segment: DepthSceneSegment): THREE.BufferGeometry {
+  const height = segment.heightM * 4
+  const dx = segment.end.x - segment.start.x
+  const dy = segment.end.y - segment.start.y
+  const horizontalLength = Math.hypot(dx, dy) || 1
+  const offsetX = (-dy / horizontalLength) * segment.widthM / 2
+  const offsetY = (dx / horizontalLength) * segment.widthM / 2
+  const point = (x: number, y: number, z: number) => [x, y, z] as const
+  const topStartLeft = point(segment.start.x + offsetX, segment.start.y + offsetY, segment.start.z)
+  const topStartRight = point(segment.start.x - offsetX, segment.start.y - offsetY, segment.start.z)
+  const topEndLeft = point(segment.end.x + offsetX, segment.end.y + offsetY, segment.end.z)
+  const topEndRight = point(segment.end.x - offsetX, segment.end.y - offsetY, segment.end.z)
+  const vertices = [topStartLeft, topStartRight, point(topStartLeft[0], topStartLeft[1], topStartLeft[2] - height), point(topStartRight[0], topStartRight[1], topStartRight[2] - height), topEndLeft, topEndRight, point(topEndLeft[0], topEndLeft[1], topEndLeft[2] - height), point(topEndRight[0], topEndRight[1], topEndRight[2] - height)]
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices.flat(), 3))
+  geometry.setIndex([0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3])
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+export function cameraFrame(points: readonly { readonly x: number; readonly y: number; readonly z: number }[], aspect: number) {
+  const box = new THREE.Box3().setFromPoints(points.map((point) => new THREE.Vector3(point.x, point.y, point.z)))
+  const target = box.getCenter(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const radius = Math.max(size.x / Math.max(aspect, 0.1), size.y, size.z, 20) / 2
+  const distance = radius / Math.tan(THREE.MathUtils.degToRad(42) / 2) * 1.35
+  return { target, position: target.clone().add(new THREE.Vector3(0, -distance, distance)) }
+}
+
 function dispose(object: THREE.Object3D): void {
   object.traverse((child) => {
     const mesh = child as THREE.Mesh
@@ -44,11 +73,11 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   const bounds = segments.flatMap((segment) => [segment.start, segment.end])
+  const initialFrame = cameraFrame(bounds, camera.aspect)
   const size = Math.max(20, ...bounds.flatMap((point) => [Math.abs(point.x), Math.abs(point.y)]))
-  const target = new THREE.Vector3(size / 2, 0, -8)
   const resetView = () => {
-    camera.position.set(size * 1.15, -size * 1.15, size * 0.9)
-    controls.target.copy(target)
+    camera.position.copy(initialFrame.position)
+    controls.target.copy(initialFrame.target)
     controls.update()
   }
   resetView()
@@ -57,16 +86,10 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
   surface.receiveShadow = true
   scene.add(surface)
   for (const segment of segments) {
-    const height = segment.heightM * 4
-    const start = new THREE.Vector3(segment.start.x, segment.start.y, segment.start.z - height / 2)
-    const end = new THREE.Vector3(segment.end.x, segment.end.y, segment.end.z - height / 2)
-    const vector = end.clone().sub(start)
     const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(vector.length(), segment.widthM, height),
+      buildEnvelopeGeometry(segment),
       new THREE.MeshStandardMaterial({ color: '#e9582f', roughness: 0.45 }),
     )
-    mesh.position.copy(start.clone().add(end).multiplyScalar(0.5))
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), vector.normalize())
     scene.add(mesh)
   }
   let frame = 0

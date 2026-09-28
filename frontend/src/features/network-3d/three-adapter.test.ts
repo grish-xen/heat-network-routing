@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { DepthSceneSegment } from '../depth-profile/depth-path'
-import { sceneObjectDescriptors } from './three-adapter'
+import { buildEnvelopeGeometry, cameraFrame, sceneObjectDescriptors } from './three-adapter'
 
 const segment: DepthSceneSegment = {
   feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[37.4, 55.6], [37.41, 55.61]] }, properties: { id: { kind: 'string', value: 'edge' }, objectType: 'heat_network' } },
@@ -15,5 +15,21 @@ describe('3D scene data', () => {
       expect.objectContaining({ kind: 'surface', z: 0, opacity: 0.24 }),
       expect.objectContaining({ kind: 'pipe', widthM: 0.47, heightM: 0.64, color: '#e9582f' }),
     ]))
+  })
+
+  it('keeps envelope width horizontal and height vertical on a sloped route', () => {
+    const geometry = buildEnvelopeGeometry({ ...segment, end: { x: -4, y: 1, z: -13.65 } })
+    const positions = geometry.getAttribute('position').array as Float32Array
+    const elevations = Array.from(positions).filter((_, index) => index % 3 === 2)
+
+    expect(Math.max(...elevations)).toBeCloseTo(-12)
+    expect(Math.min(...elevations)).toBeCloseTo(-14.29)
+  })
+
+  it('frames westbound paths around their actual bounds', () => {
+    const frame = cameraFrame([{ x: 0, y: 0, z: -12 }, { x: -100, y: 0, z: -12 }], 1.3)
+
+    expect(frame.target.x).toBeCloseTo(-50)
+    expect(frame.position.x).toBeLessThan(100)
   })
 })
