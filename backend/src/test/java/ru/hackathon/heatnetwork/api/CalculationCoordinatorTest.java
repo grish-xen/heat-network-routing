@@ -195,6 +195,42 @@ class CalculationCoordinatorTest {
         }
     }
 
+    @Test void searchDiagnosticsSurviveRejectedCandidatesAndBudgetLimitWithAResult() throws Exception {
+        RoutePlanner.SearchSession session = session(3);
+        JobProperties properties = new JobProperties();
+        properties.setMaxCandidates(2);
+        AtomicInteger calls = new AtomicInteger();
+        List<ApiError> diagnostics = new ArrayList<>();
+        CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session, (d, c, mode) -> {
+            if (calls.getAndIncrement() == 0) return new Evaluation();
+            return accepted(c.candidateId, profile("ok", mode, 3.0, 1));
+        }, properties);
+        assertEquals(1, coordinator.calculate(dataset, Mode.DEPTH, stage -> { }, diagnostics).size());
+        assertTrue(diagnostics.stream().anyMatch(d -> "SEARCH_BUDGET_EXHAUSTED".equals(d.code)));
+        verify(session, times(2)).feedback(any());
+    }
+
+    @Test void candidateDiagnosticsArePreservedWithoutInventingBudgetExhaustionFromEmptyOptional() throws Exception {
+        RoutePlanner.SearchSession session = session(1);
+        RouteCandidate candidate = new RouteCandidate(); candidate.candidateId = "c";
+        Diagnostic diagnostic = new Diagnostic(); diagnostic.code = "SEARCH_BUDGET_EXHAUSTED";
+        diagnostic.message = "internal limit"; candidate.diagnostics.add(diagnostic);
+        when(session.next()).thenReturn(Optional.of(candidate), Optional.empty());
+        List<ApiError> diagnostics = new ArrayList<>();
+        CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session,
+                (d, c, mode) -> accepted(c.candidateId, profile("ok", mode, 3, 1)), new JobProperties());
+        coordinator.calculate(dataset, Mode.DEPTH, stage -> { }, diagnostics);
+        assertEquals(1, diagnostics.size());
+        assertEquals("internal limit", diagnostics.get(0).message);
+
+        RoutePlanner.SearchSession ordinary = session(1);
+        diagnostics.clear();
+        new CalculationCoordinator((d, o) -> ordinary,
+                (d, c, mode) -> accepted(c.candidateId, profile("ok", mode, 3, 1)), new JobProperties())
+                .calculate(dataset, Mode.DEPTH, stage -> { }, diagnostics);
+        assertTrue(diagnostics.isEmpty());
+    }
+
     private RoutePlanner.SearchSession session(int count) {
         RoutePlanner.SearchSession session = mock(RoutePlanner.SearchSession.class);
         AtomicInteger sequence = new AtomicInteger();

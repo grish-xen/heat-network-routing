@@ -296,15 +296,16 @@ class RoutingModuleTest {
     }
 
     @Test
-    void depthModeIsRejected() {
+    void depthModeProducesPlanCandidates() {
         List<InputObject> objects = new ArrayList<>();
         objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(400, 0)));
         objects.add(connectionPoint(1, 10, new Coordinate(200, 100)));
         SearchOptions options = twoD(5);
         options.mode = Model.Mode.DEPTH;
-        // Contract 1.0: DEPTH is reserved; opening a session must fail with UNSUPPORTED_MODE.
-        org.junit.jupiter.api.Assertions.assertThrows(UnsupportedOperationException.class,
-                () -> new GridRoutePlanner(new InMemoryDataset(objects), options, null));
+        GridRoutePlanner planner = new GridRoutePlanner(new InMemoryDataset(objects), options, null);
+        try {
+            org.junit.jupiter.api.Assertions.assertTrue(planner.next().isPresent());
+        } finally { planner.close(); }
     }
 
     @Test

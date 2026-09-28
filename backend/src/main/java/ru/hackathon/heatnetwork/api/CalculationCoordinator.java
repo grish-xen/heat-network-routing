@@ -33,8 +33,12 @@ public final class CalculationCoordinator {
         return calculate(dataset, Mode.TWO_D, progress);
     }
 
-    // Internal integration entry point; HTTP admission remains gated in JobService.
     List<CalculatedVariant> calculate(Dataset dataset, Mode mode, Progress progress) throws IOException {
+        return calculate(dataset, mode, progress, new ArrayList<>());
+    }
+
+    List<CalculatedVariant> calculate(Dataset dataset, Mode mode, Progress progress,
+                                      List<ApiError> searchDiagnostics) throws IOException {
         SearchOptions options = new SearchOptions();
         options.mode = Objects.requireNonNull(mode, "mode");
         options.maxCandidates = properties.getMaxCandidates();
@@ -46,13 +50,17 @@ public final class CalculationCoordinator {
         List<ApiError> rejections = new ArrayList<>();
         interrupted();
         progress.stage(JobView.Stage.ROUTING);
+        int count = 0;
         try (RoutePlanner.SearchSession session = planner.open(dataset, options)) {
-            for (int count = 0; count < options.maxCandidates; count++) {
+            for (; count < options.maxCandidates; count++) {
                 interrupted();
                 progress.stage(JobView.Stage.ROUTING);
                 Optional<RouteCandidate> next = session.next();
                 interrupted();
                 if (next.isEmpty()) break;
+                for (Diagnostic diagnostic : next.get().diagnostics) {
+                    if (searchDiagnostics.size() < 20) searchDiagnostics.add(ApiError.from(diagnostic));
+                }
                 progress.stage(JobView.Stage.CALCULATING);
                 Evaluation evaluation = calculator.evaluate(dataset, next.get(), options.mode);
                 interrupted();
@@ -84,7 +92,12 @@ public final class CalculationCoordinator {
             }
         }
         interrupted();
+        if (count == options.maxCandidates && searchDiagnostics.stream().noneMatch(d -> "SEARCH_BUDGET_EXHAUSTED".equals(d.code))) {
+            searchDiagnostics.add(new ApiError("SEARCH_BUDGET_EXHAUSTED",
+                    "Достигнут лимит кандидатов. Это не доказывает невозможность подключения."));
+        }
         if (best.isEmpty()) {
+            rejections.addAll(searchDiagnostics);
             rejections.add(0, new ApiError("ROUTE_NOT_FOUND", "В пределах бюджета поиска не найден допустимый вариант. Это не доказывает невозможность подключения."));
             throw new NoValidVariantException(rejections);
         }

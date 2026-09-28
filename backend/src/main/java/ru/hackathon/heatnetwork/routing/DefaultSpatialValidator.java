@@ -64,6 +64,9 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         checkTurns(variant, diagnostics);
         checkEdgeCrossings(variant, diagnostics);
         checkRestrictions(dataset, variant, nodeById, diagnostics);
+        if (variant.mode == ru.hackathon.heatnetwork.model.Model.Mode.DEPTH) {
+            new DepthSpatialValidation(catalog).validate(dataset, variant, diagnostics);
+        }
         return diagnostics;
     }
 

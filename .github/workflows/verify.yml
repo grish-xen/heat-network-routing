@@ -57,6 +57,12 @@ jobs:
               cat "$RUNNER_TEMP/api-smoke-server.log"
               exit 1
             }
+          python scripts/smoke_api.py --base-url http://127.0.0.1:18080 --mode depth \
+            --input test-data/synthetic/depth/gas-below/input.geojson --require-full-connection \
+            --report "$RUNNER_TEMP/api-depth.json" || {
+              cat "$RUNNER_TEMP/api-smoke-server.log"
+              exit 1
+            }
       - run: python -m pip install -r scripts/requirements-checks.txt
       - run: python -m openapi_spec_validator contracts/openapi.json
       - run: python scripts/check_depth_schemas.py

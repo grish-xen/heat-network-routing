@@ -141,11 +141,62 @@ class JobApiTest {
         assertError(400, "INVALID_INPUT", upload(body(new byte[] {1}), mode));
     }
 
-    @Test void depthAndDuplicateModesHaveExplicitErrors() {
-        assertError(422, "UNSUPPORTED_MODE", upload(body(new byte[] {1}), "depth"));
+    @Test void duplicateModesHaveExplicitErrors() {
         MultiValueMap<String, Object> duplicate = body(new byte[] {1});
         duplicate.add("mode", "2d");
         assertError(400, "INVALID_INPUT", upload(duplicate, "2d"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"flat", "gas-below", "gas-above", "cable-below", "network-below", "road", "branch"})
+    void depthHttpRunsRealModulesAndMatchesResultMapAndSummary(String name) throws Exception {
+        byte[] fixture;
+        try (InputStream input = getClass().getResourceAsStream("/fixtures/synthetic/depth/" + name + "/input.geojson")) {
+            assertNotNull(input);
+            fixture = input.readAllBytes();
+        }
+        ResponseEntity<JsonNode> accepted = upload(body(fixture), "depth");
+        assertEquals(202, accepted.getStatusCodeValue());
+        String location = accepted.getHeaders().getLocation().toString();
+        JsonNode job = completed(location);
+        assertEquals("depth", job.path("mode").asText());
+        assertEquals("SUCCEEDED", job.path("status").asText(), job.toString());
+        JsonNode variants = http.getForObject(location + "/variants", JsonNode.class);
+        assertEquals(0, variants.get(0).path("unconnected_oks_ids").size());
+        JsonNode result = mapper.readTree(http.getForObject(location + "/result", byte[].class));
+        java.util.List<JsonNode> expectedMap = new java.util.ArrayList<>();
+        int networks = 0;
+        boolean changedDepth = false;
+        for (JsonNode feature : result.path("features")) {
+            JsonNode p = feature.path("properties");
+            if (p.path("object_type").asText().equals("heat_network")) {
+                networks++;
+                assertTrue(p.path("depth_start").isNumber());
+                assertTrue(p.path("depth_end").isNumber());
+                assertTrue(p.path("depth_start").asDouble() >= 0.7);
+                changedDepth |= p.path("depth_start").asDouble() != 3.0 || p.path("depth_end").asDouble() != 3.0;
+            }
+            if (p.path("variant_id").asText().equals(variants.get(0).path("variant_id").asText())) {
+                if (!feature.path("geometry").isNull()) expectedMap.add(feature);
+                else assertTrue(p.equals((a, b) -> a.isNumber() && b.isNumber()
+                        ? a.decimalValue().compareTo(b.decimalValue()) : a.equals(b) ? 0 : 1, variants.get(0)));
+            }
+        }
+        assertTrue(networks > 0);
+        if (name.startsWith("gas")) assertTrue(changedDepth, "gas crossing needs a real vertical transition");
+        String variantId = variants.get(0).path("variant_id").asText();
+        assertEquals(expectedMap, mapPages(location + "/map?layer=result&variantId=" + variantId + "&bbox=-180,-90,180,90&limit=2"));
+        assertEquals(4, http.getForObject(location + "/map/bounds?variantId=" + variantId, JsonNode.class).path("bbox").size());
+    }
+
+    @Test void invalidDepthInputFailsAsDepthWithoutPublishingAResult() throws Exception {
+        ResponseEntity<JsonNode> accepted = upload(body(new byte[]{1}), "depth");
+        assertEquals(202, accepted.getStatusCodeValue());
+        String location = accepted.getHeaders().getLocation().toString();
+        JsonNode result = completed(location);
+        assertEquals("FAILED", result.path("status").asText());
+        assertEquals("depth", result.path("mode").asText());
+        assertError(409, "RESULT_NOT_READY", http.getForEntity(location + "/result", JsonNode.class));
     }
 
     @Test void servletEnforcesFileAndTotalRequestLimitsWithJson413() {
