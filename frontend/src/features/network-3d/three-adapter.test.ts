@@ -1,0 +1,19 @@
+import { describe, expect, it } from 'vitest'
+
+import type { DepthSceneSegment } from '../depth-profile/depth-path'
+import { sceneObjectDescriptors } from './three-adapter'
+
+const segment: DepthSceneSegment = {
+  feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[37.4, 55.6], [37.41, 55.61]] }, properties: { id: { kind: 'string', value: 'edge' }, objectType: 'heat_network' } },
+  start: { x: 0, y: 0, z: -12 }, end: { x: 20, y: 0, z: -13.6 }, depthStart: 3, depthEnd: 3.4,
+  widthM: 0.47, heightM: 0.16, distanceStartM: 0, distanceEndM: 20,
+}
+
+describe('3D scene data', () => {
+  it('includes a surface and scaled design envelope for every selected segment', () => {
+    expect(sceneObjectDescriptors([segment])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'surface', z: 0 }),
+      expect.objectContaining({ kind: 'pipe', widthM: 0.47, heightM: 0.16, color: '#e9582f' }),
+    ]))
+  })
+})
