@@ -78,6 +78,10 @@ export function buildDepthPaths(features: readonly MapFeature[]): readonly Depth
   return paths
 }
 
+export function selectDepthPath(paths: readonly DepthPath[], endpointKey: string | null): DepthPath | undefined {
+  return paths.find((path) => objectIdKey(path.endNodeId) === endpointKey) ?? paths[0]
+}
+
 function metres(position: Position): readonly [number, number] {
   const point = proj4('EPSG:4326', UTM_37N, [position[0], position[1]])
   return [point[0]!, point[1]!]
@@ -95,30 +99,38 @@ export function toMetricSegments(path: DepthPath): readonly DepthSceneSegment[] 
   if (!first || first.type !== 'LineString') return []
   const origin = metres(first.coordinates[0]!)
   let distanceStartM = 0
-  return path.segments.map((segment) => {
+  return path.segments.flatMap((segment) => {
     const geometry = segment.feature.geometry
     if (geometry.type !== 'LineString') throw new Error('Маршрут глубины должен состоять из линий')
     const projected = geometry.coordinates.map(metres)
     const catalog = visualizationRules.diameters.find((item) => item.diameterMm === segment.feature.properties.diameter)
     if (!catalog) throw new Error(`Нет габарита для ДУ ${segment.feature.properties.diameter ?? '—'}`)
     const length = distance(projected)
-    const start = projected[0]!
-    const end = projected.at(-1)!
     const depthStart = segment.feature.properties.depthStart!
     const depthEnd = segment.feature.properties.depthEnd!
-    const sceneSegment: DepthSceneSegment = {
-      feature: segment.feature,
-      start: { x: start[0] - origin[0], y: start[1] - origin[1], z: -depthStart * VERTICAL_EXAGGERATION },
-      end: { x: end[0] - origin[0], y: end[1] - origin[1], z: -depthEnd * VERTICAL_EXAGGERATION },
-      depthStart,
-      depthEnd,
-      widthM: catalog.widthM,
-      heightM: catalog.heightM,
-      distanceStartM,
-      distanceEndM: distanceStartM + length,
-    }
-    distanceStartM += length
-    return sceneSegment
+    let edgeDistanceM = 0
+    return projected.slice(1).map((end, index) => {
+      const start = projected[index]!
+      const pieceLength = Math.hypot(end[0] - start[0], end[1] - start[1])
+      const ratioStart = edgeDistanceM / length
+      edgeDistanceM += pieceLength
+      const ratioEnd = edgeDistanceM / length
+      const pieceDepthStart = depthStart + (depthEnd - depthStart) * ratioStart
+      const pieceDepthEnd = depthStart + (depthEnd - depthStart) * ratioEnd
+      const sceneSegment: DepthSceneSegment = {
+        feature: segment.feature,
+        start: { x: start[0] - origin[0], y: start[1] - origin[1], z: -pieceDepthStart * VERTICAL_EXAGGERATION },
+        end: { x: end[0] - origin[0], y: end[1] - origin[1], z: -pieceDepthEnd * VERTICAL_EXAGGERATION },
+        depthStart: pieceDepthStart,
+        depthEnd: pieceDepthEnd,
+        widthM: catalog.widthM,
+        heightM: catalog.heightM,
+        distanceStartM,
+        distanceEndM: distanceStartM + pieceLength,
+      }
+      distanceStartM += pieceLength
+      return sceneSegment
+    })
   })
 }
 

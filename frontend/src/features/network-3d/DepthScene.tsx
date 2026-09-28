@@ -9,11 +9,13 @@ export function DepthScene({ segments }: { readonly segments: readonly DepthScen
   const adapter = useRef<DepthSceneAdapter | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
+    if (segments.length === 0) return
     if (!host.current) return
     try { adapter.current = createDepthSceneAdapter(host.current, segments) }
     catch { queueMicrotask(() => setError('3D-сцена недоступна в этом браузере. Откройте карту или профиль.')) }
     return () => { adapter.current?.destroy(); adapter.current = null }
   }, [segments])
+  if (segments.length === 0) return <p className="depth-empty">Нет участков с глубиной для 3D-сцены.</p>
   if (error) return <p className="depth-empty" role="alert">{error}</p>
   return <section className="depth-scene" aria-label="3D-сцена тепловой сети">
     <div className="depth-scene-toolbar"><span>Вертикальный масштаб ×{VERTICAL_EXAGGERATION}</span><button type="button" onClick={() => adapter.current?.resetView()}>Сбросить ракурс</button></div>

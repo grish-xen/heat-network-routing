@@ -9,12 +9,13 @@ export interface SceneObjectDescriptor {
   readonly widthM?: number
   readonly heightM?: number
   readonly color?: string
+  readonly opacity?: number
 }
 
 export function sceneObjectDescriptors(segments: readonly DepthSceneSegment[]): readonly SceneObjectDescriptor[] {
   return [
-    { kind: 'surface', z: 0 },
-    ...segments.map((segment) => ({ kind: 'pipe' as const, z: segment.start.z, widthM: segment.widthM, heightM: segment.heightM, color: '#e9582f' })),
+    { kind: 'surface', z: 0, opacity: 0.24 },
+    ...segments.map((segment) => ({ kind: 'pipe' as const, z: segment.start.z, widthM: segment.widthM, heightM: segment.heightM * 4, color: '#e9582f' })),
   ]
 }
 
@@ -52,15 +53,16 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
   }
   resetView()
   scene.add(new THREE.HemisphereLight('#ffffff', '#71877d', 2.1), new THREE.DirectionalLight('#ffffff', 1.4))
-  const surface = new THREE.Mesh(new THREE.PlaneGeometry(size * 3, size * 3), new THREE.MeshStandardMaterial({ color: '#d8e5d4', roughness: 0.95 }))
+  const surface = new THREE.Mesh(new THREE.PlaneGeometry(size * 3, size * 3), new THREE.MeshStandardMaterial({ color: '#d8e5d4', roughness: 0.95, transparent: true, opacity: 0.24, depthWrite: false }))
   surface.receiveShadow = true
   scene.add(surface)
   for (const segment of segments) {
-    const start = new THREE.Vector3(segment.start.x, segment.start.y, segment.start.z - segment.heightM / 2)
-    const end = new THREE.Vector3(segment.end.x, segment.end.y, segment.end.z - segment.heightM / 2)
+    const height = segment.heightM * 4
+    const start = new THREE.Vector3(segment.start.x, segment.start.y, segment.start.z - height / 2)
+    const end = new THREE.Vector3(segment.end.x, segment.end.y, segment.end.z - height / 2)
     const vector = end.clone().sub(start)
     const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(vector.length(), segment.heightM, segment.widthM),
+      new THREE.BoxGeometry(vector.length(), segment.widthM, height),
       new THREE.MeshStandardMaterial({ color: '#e9582f', roughness: 0.45 }),
     )
     mesh.position.copy(start.clone().add(end).multiplyScalar(0.5))

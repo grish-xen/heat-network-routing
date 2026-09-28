@@ -10,7 +10,7 @@ import { NetworkMap } from '../network-map/NetworkMap'
 import { expandBoundsForMapQuery } from '../network-map/map-query'
 import { useMapBounds, useMapFeatureCollections } from '../network-map/use-map-features'
 import { DepthProfile } from '../depth-profile/DepthProfile'
-import { buildDepthPaths, toMetricSegments } from '../depth-profile/depth-path'
+import { buildDepthPaths, selectDepthPath, toMetricSegments } from '../depth-profile/depth-path'
 import { DepthScene } from '../network-3d/DepthScene'
 import { VariantComparison } from '../variants/VariantComparison'
 import { VariantList } from '../variants/VariantList'
@@ -29,6 +29,7 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [mapUnavailable, setMapUnavailable] = useState(false)
   const [view, setView] = useState<'map' | 'profile' | '3d'>(mode === 'depth' ? '3d' : 'map')
+  const [endpointKey, setEndpointKey] = useState<string | null>(null)
   const ranked = [...(variants.data ?? [])].sort((left, right) => left.rank - right.rank)
   const selected = ranked.find((variant) => objectIdKey(variant.variantId) === selectedKey) ?? ranked[0]
   const bounds = useMapBounds(api, jobId, selected?.variantId)
@@ -36,7 +37,8 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
     layer: 'result' as const, variantId: selected.variantId, bbox: expandBoundsForMapQuery(bounds.data), limit: 1000,
   }] : [], mode === 'depth')
   const paths = buildDepthPaths(depthQueries.flatMap((query) => query.data?.features ?? []))
-  const sceneSegments = paths[0] ? toMetricSegments(paths[0]) : []
+  const activePath = selectDepthPath(paths, endpointKey)
+  const sceneSegments = activePath ? toMetricSegments(activePath) : []
 
   if (variants.isPending) {
     return <main className="result-loading"><Spinner /> Загружаем варианты…</main>
@@ -61,6 +63,12 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
           <button type="button" role="tab" aria-selected={view === 'profile'} onClick={() => setView('profile')}>Профиль</button>
           <button type="button" role="tab" aria-selected={view === '3d'} onClick={() => setView('3d')}>3D-сцена</button>
         </div>}
+        {mode === 'depth' && paths.length > 1 && <label className="depth-endpoint-selector">
+          Конечный потребитель
+          <select value={objectIdKey(activePath!.endNodeId)} onChange={(event) => setEndpointKey(event.target.value)}>
+            {paths.map((path) => <option key={objectIdKey(path.endNodeId)} value={objectIdKey(path.endNodeId)}>{path.endNodeId.value}</option>)}
+          </select>
+        </label>}
         {mapUnavailable && <Alert>Карта недоступна без WebGL2. Сравнение вариантов и файл результата остаются доступны.</Alert>}
         <div className="result-actions">
           <a className="button download-link" href={api.getResultUrl(jobId)} download={`${jobId}.geojson`}>

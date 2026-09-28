@@ -10,10 +10,16 @@ import { DepthScene } from './DepthScene'
 describe('DepthScene', () => {
   it('labels vertical exaggeration and resets the scene view', async () => {
     const user = userEvent.setup()
-    render(<DepthScene segments={[]} />)
+    render(<DepthScene segments={[{} as never]} />)
 
     expect(screen.getByText(/вертикальный масштаб ×4/i)).toBeVisible()
     await user.click(screen.getByRole('button', { name: /сбросить ракурс/i }))
     expect(adapter.resetView).toHaveBeenCalled()
+  })
+
+  it('shows an empty state instead of creating a scene without depth data', () => {
+    render(<DepthScene segments={[]} />)
+
+    expect(screen.getByText(/нет участков с глубиной/i)).toBeVisible()
   })
 })

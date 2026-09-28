@@ -12,8 +12,8 @@ const segment: DepthSceneSegment = {
 describe('3D scene data', () => {
   it('includes a surface and scaled design envelope for every selected segment', () => {
     expect(sceneObjectDescriptors([segment])).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'surface', z: 0 }),
-      expect.objectContaining({ kind: 'pipe', widthM: 0.47, heightM: 0.16, color: '#e9582f' }),
+      expect.objectContaining({ kind: 'surface', z: 0, opacity: 0.24 }),
+      expect.objectContaining({ kind: 'pipe', widthM: 0.47, heightM: 0.64, color: '#e9582f' }),
     ]))
   })
 })
