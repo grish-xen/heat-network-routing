@@ -51,6 +51,12 @@ jobs:
               cat "$RUNNER_TEMP/api-smoke-server.log"
               exit 1
             }
+          python scripts/smoke_api.py --base-url http://127.0.0.1:18080 \
+            --input test-data/competition-corrected.geojson --require-full-connection \
+            --report "$RUNNER_TEMP/api-competition.json" || {
+              cat "$RUNNER_TEMP/api-smoke-server.log"
+              exit 1
+            }
       - run: python -m pip install -r scripts/requirements-checks.txt
       - run: python -m openapi_spec_validator contracts/openapi.json
       - run: docker compose config --quiet

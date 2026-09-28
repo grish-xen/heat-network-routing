@@ -127,6 +127,68 @@ class RoutingModuleTest {
 
     // --------------------------------------------------------------- tests
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(doubles = {20, 120})
+    void finalApproachCannotJumpAcrossAnObstacle(double goalY) {
+        Geometry park = square(195, goalY - 12, 205, goalY - 8);
+        List<InputObject> objects = List.of(
+                line("L", 300, new Coordinate(0, 0), new Coordinate(400, 0)),
+                restriction("park", "park", park),
+                connectionPoint("target", 10, new Coordinate(200, goalY)));
+        GridRoutePlanner planner = new GridRoutePlanner(new InMemoryDataset(objects), twoD(10), null);
+        Model.RouteCandidate candidate = planner.next().orElseThrow();
+        assertPointConnected(candidate, objects.get(2).id);
+        for (Model.Edge edge : candidate.edges) {
+            assertFalse(edge.geometry.intersects(park), "the final approach must be checked too");
+        }
+        planner.close();
+    }
+
+    @Test
+    void interruptedSearchStopsAndPreservesInterruptFlag() {
+        GridRoutePlanner planner = new GridRoutePlanner(new InMemoryDataset(List.of(
+                line("L", 300, new Coordinate(0, 0), new Coordinate(400, 0)),
+                connectionPoint("target", 10, new Coordinate(200, 300)))), twoD(10), null);
+        try {
+            Thread.currentThread().interrupt();
+            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.CancellationException.class,
+                    planner::next);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+            planner.close();
+        }
+    }
+
+    @Test
+    void branchingConnectsMoreTargetsThanTheRootHasFreeAdjacencies() {
+        List<InputObject> objects = List.of(
+                line("L", 400, new Coordinate(-100, 0), new Coordinate(0, 0)),
+                chamber("C", new Coordinate(0, 0)),
+                connectionPoint("A", 50, new Coordinate(150, 300)),
+                connectionPoint("B", 40, new Coordinate(160, 250)),
+                connectionPoint("D", 30, new Coordinate(200, 270)),
+                connectionPoint("E", 20, new Coordinate(180, 320)),
+                connectionPoint("F", 10, new Coordinate(220, 350)));
+        InMemoryDataset data = new InMemoryDataset(objects);
+        RulesCatalog rules = RulesCatalog.loadDefault();
+        ru.hackathon.heatnetwork.calculation.DefaultVariantCalculator calculator =
+                new ru.hackathon.heatnetwork.calculation.DefaultVariantCalculator(rules,
+                        new DefaultSpatialValidator(rules));
+        GridRoutePlanner planner = new GridRoutePlanner(data, twoD(100), rules);
+        Model.RouteCandidate best = null;
+        Optional<Model.RouteCandidate> next;
+        while ((next = planner.next()).isPresent()) {
+            Evaluation evaluation = calculator.evaluate(data, next.get(), Model.Mode.TWO_D);
+            planner.feedback(evaluation);
+            if (evaluation.accepted()) best = next.get();
+        }
+        org.junit.jupiter.api.Assertions.assertNotNull(best, "calculator must accept a candidate");
+        assertTrue(best.unconnectedPointIds.isEmpty(), "all five targets must connect");
+        assertTrue(best.nodes.stream().anyMatch(n -> n.id.startsWith("b:")), "expected a branch chamber");
+        planner.close();
+    }
+
     @Test
     void singleTargetWithoutObstaclesConnectsByStraightLine() {
         // Existing line along y=0 from (0,0) to (400,0), chamber at (0,0),

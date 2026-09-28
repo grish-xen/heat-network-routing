@@ -41,8 +41,8 @@ import ru.hackathon.heatnetwork.model.ObjectId;
  *
  * <p>Tie points: an existing chamber within reach (the 10 m rule is applied to the
  * chosen point on an existing line), otherwise a snapped point on an existing
- * heat_network line where a new chamber will be created. When direct tie options
- * fail, the planner taps into already accepted traces: a vertex of a parent polyline
+ * heat_network line where a new chamber will be created. After the nearest tie
+ * fails, the planner tries accepted traces before the remaining direct ties: a vertex of a parent polyline
  * becomes a new chamber (the parent edge is split there, keeping each branch node at
  * two split adjacencies plus up to two taps within the four-adjacency limit), and the
  * new edge runs from that chamber to the target. Traces accumulate into one tree per
@@ -50,6 +50,7 @@ import ru.hackathon.heatnetwork.model.ObjectId;
  * coordinator can still evaluate the penalty variant.</p>
  */
 public final class GridRoutePlanner {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(GridRoutePlanner.class);
 
     /** Safety cap on attempts per target; real exhaustion is tracked by the stage machine. */
     static final int MAX_TRACES_PER_TARGET = 100;
@@ -90,6 +91,7 @@ public final class GridRoutePlanner {
         final TieOption tie;
         /** Root→target (direct) or tap point→target (tapped) polyline. */
         final List<Coordinate> points;
+        final LineString polyline;
         /** Root key of the tree this trace belongs to. */
         final String rootId;
         /** Parent trace target when tapped; null for a direct trace. */
@@ -102,6 +104,7 @@ public final class GridRoutePlanner {
             this.targetId = targetId;
             this.tie = tie;
             this.points = points;
+            this.polyline = new GeometryFactory().createLineString(points.toArray(new Coordinate[0]));
             this.rootId = rootId;
             this.tapParentTargetId = tapParentTargetId;
             this.tapVertexIndex = tapVertexIndex;
@@ -145,8 +148,8 @@ public final class GridRoutePlanner {
     }
 
     /**
-     * Per-target attempt machine. Stages: 0 = ties at 25 m (snap radius 400 m),
-     * 1 = taps on accepted traces, 2 = ties at 25 m (radii 1000/2500/∞),
+     * Per-target attempt machine. Stages: 0 = nearest tie at 25 m (snap radius 400 m),
+     * 1 = taps on accepted traces, 2 = remaining ties at 25 m (all radii),
      * 3 = ties at 40 m (all radii), 4 = ties at 60 m (all radii).
      */
     private static final class TargetAttemptState {
@@ -155,6 +158,7 @@ public final class GridRoutePlanner {
         int tieIndex = 0;
         List<TieOption> currentOptions = null;
         final Set<String> triedTaps = new HashSet<>();
+        final Set<String> triedTies = new HashSet<>();
         boolean exhaustedAll = false;
     }
 
@@ -243,6 +247,7 @@ public final class GridRoutePlanner {
             }
             RoutingContext.Target target = target(targetId);
             int attempt = attemptCounters.merge(targetId, 1, Integer::sum);
+            LOG.debug("Search target={} attempt={} accepted={}", targetId.value(), attempt, acceptedTraces.size());
             Trace trace = traceToTarget(target, attempt);
             if (trace == null) {
                 TargetAttemptState state = attemptStates.get(targetId);
@@ -267,6 +272,12 @@ public final class GridRoutePlanner {
     }
 
     public synchronized void feedback(Evaluation evaluation) {
+        if (LOG.isDebugEnabled() && evaluation != null) {
+            LOG.debug("Candidate target={} accepted={} diagnostics={}",
+                    lastEmittedTarget == null ? null : lastEmittedTarget.value(), evaluation.accepted(),
+                    evaluation.diagnostics.stream().map(d -> d.code + ":" + d.message)
+                            .collect(java.util.stream.Collectors.toList()));
+        }
         if (evaluation == null || evaluation.accepted()) {
             return;
         }
@@ -356,11 +367,14 @@ public final class GridRoutePlanner {
         Coordinate goal = target.point.getCoordinate();
         int diameter = targetDiameter.get(target.id);
         while (!state.exhaustedAll) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Route search interrupted");
+            }
             if (state.stage == 1) {
                 TapCandidate tap = nextTap(target, state);
                 if (tap == null) {
                     state.stage = 2;
-                    state.optionIndex = 1;
+                    state.optionIndex = 0;
                     state.tieIndex = 0;
                     state.currentOptions = null;
                     continue;
@@ -380,7 +394,7 @@ public final class GridRoutePlanner {
             if (state.currentOptions == null) {
                 state.currentOptions = tieOptions(target, state.optionIndex);
             }
-            if (state.tieIndex >= state.currentOptions.size()) {
+            if (state.tieIndex >= state.currentOptions.size() || (state.stage == 0 && state.tieIndex >= 1)) {
                 int maxOptionIndex = state.stage == 0 ? 0 : 3;
                 state.optionIndex++;
                 state.tieIndex = 0;
@@ -391,13 +405,16 @@ public final class GridRoutePlanner {
                         state.exhaustedAll = true;
                         break;
                     }
-                    state.optionIndex = state.stage == 2 ? 1 : 0;
+                    state.optionIndex = 0;
                     state.tieIndex = 0;
                 }
                 continue;
             }
             TieOption tie = state.currentOptions.get(state.tieIndex);
             state.tieIndex++;
+            // Wider radii contain the earlier choices. Retry only on a different
+            // grid, and recheck capacity because other targets may have connected.
+            if (newEdgeBudget(tie) < 1 || !state.triedTies.add(step + ":" + rootKey(tie))) continue;
             List<Coordinate> path = aStar(tie.coordinate, goal, target.ownOksPolygonId, diameter,
                     step, tie.exemptLineId, null, null);
             if (path == null) {
@@ -671,6 +688,16 @@ public final class GridRoutePlanner {
     private List<Coordinate> aStar(Coordinate start, Coordinate goal, ObjectId exemptOksPolygonId,
                                    int diameterMm, double step, ObjectId exemptLineId,
                                    ObjectId parentTargetId, Coordinate tapPoint) {
+        long began = System.nanoTime();
+        LOG.debug("A* start={} goal={} step={} branch={}", start, goal, step, parentTargetId != null);
+        List<Coordinate> result = searchGrid(start, goal, exemptOksPolygonId, diameterMm, step, exemptLineId, parentTargetId, tapPoint);
+        LOG.debug("A* vertices={} elapsedMs={}", result == null ? 0 : result.size(), (System.nanoTime() - began) / 1_000_000);
+        return result;
+    }
+
+    private List<Coordinate> searchGrid(Coordinate start, Coordinate goal, ObjectId exemptOksPolygonId,
+                                   int diameterMm, double step, ObjectId exemptLineId,
+                                   ObjectId parentTargetId, Coordinate tapPoint) {
         // Search bounds: envelope of start/goal/chambers/lines, padded to allow routing around
         // large restrictions (rivers, parks). Use 3x straight-line distance (capped) instead of 10x
         // to avoid excessively large search areas that cause timeouts.
@@ -680,57 +707,80 @@ public final class GridRoutePlanner {
         Map<String, Double> gScore = new HashMap<>();
         Map<String, String> cameFrom = new HashMap<>();
         Map<String, Coordinate> coords = new HashMap<>();
-        Map<String, Double> fScore = new HashMap<>();
 
-        String startKey = key(start, step);
+        String startKey = key(start, step) + ":start";
         gScore.put(startKey, 0.0);
         coords.put(startKey, start);
-        fScore.put(startKey, start.distance(goal));
 
         // PriorityQueue for O(log n) min extraction instead of O(n) linear scan.
-        PriorityQueue<String> open = new PriorityQueue<>(Comparator.comparingDouble(fScore::get));
-        open.add(startKey);
+        PriorityQueue<OpenEntry> open = new PriorityQueue<>(Comparator
+                .comparingDouble((OpenEntry entry) -> entry.estimate)
+                .thenComparingLong(entry -> entry.sequence));
+        long sequence = 0;
+        open.add(new OpenEntry(startKey, 0.0, start.distance(goal), sequence++));
 
         int expansions = 0;
         // Scale expansion limit by inverse step: finer grid has more nodes per meter.
         // Also scale by straight-line distance (capped) so distant targets get more budget
-        // but not excessively more. Base 500k at 25m step for 1km distance.
+        // but not excessively more. Base limit applies at 25 m step for 1 km distance.
         double distanceFactor = Math.max(0.5, Math.min(5.0, straightDist / 1000.0));
         int maxExpansions = (int) (BASE_MAX_EXPANSIONS * (25.0 / step) * distanceFactor);
-        String currentKey = startKey;
         while (!open.isEmpty()) {
-            currentKey = open.poll();
-            if (currentKey == null) {
-                return null;
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Route search interrupted");
             }
+            OpenEntry entry = open.poll();
+            String currentKey = entry.key;
+            // Queue priorities are immutable. An improved route leaves an old entry
+            // behind; discard it without repeating expensive spatial checks.
+            if (entry.distance > gScore.get(currentKey) + 1e-9) continue;
             Coordinate current = coords.get(currentKey);
-            if (current.distance(goal) <= step * 1.5) {
+            Coordinate previous = cameFrom.containsKey(currentKey)
+                    ? coords.get(cameFrom.get(currentKey)) : null;
+            if (current.distance(goal) <= step * 1.5
+                    && moveAllowed(current, goal, previous, exemptOksPolygonId, diameterMm,
+                            exemptLineId, parentTargetId, tapPoint)) {
                 return simplify(reconstruct(cameFrom, currentKey, coords, goal));
             }
             if (++expansions > maxExpansions) {
                 return null;
             }
 
-            Coordinate previous = cameFrom.containsKey(currentKey)
-                    ? coords.get(cameFrom.get(currentKey)) : null;
             for (Coordinate neighbor : neighbors(current, step, bounds)) {
+                // Turns depend on the incoming direction. Reaching a cell from
+                // another side is a distinct state and may permit the only exit.
+                String neighborKey = key(neighbor, step) + ":"
+                        + (int) Math.signum(neighbor.x - current.x) + ":"
+                        + (int) Math.signum(neighbor.y - current.y);
+                double tentative = entry.distance + current.distance(neighbor);
+                if (tentative >= gScore.getOrDefault(neighborKey, Double.POSITIVE_INFINITY) - 1e-9) {
+                    continue;
+                }
                 if (!moveAllowed(current, neighbor, previous, exemptOksPolygonId, diameterMm, exemptLineId,
                         parentTargetId, tapPoint)) {
                     continue;
                 }
-                String neighborKey = key(neighbor, step);
-                double tentative = gScore.getOrDefault(currentKey, Double.POSITIVE_INFINITY)
-                        + current.distance(neighbor);
-                if (tentative < gScore.getOrDefault(neighborKey, Double.POSITIVE_INFINITY) - 1e-9) {
-                    gScore.put(neighborKey, tentative);
-                    coords.put(neighborKey, neighbor);
-                    cameFrom.put(neighborKey, currentKey);
-                    fScore.put(neighborKey, tentative + neighbor.distance(goal));
-                    open.add(neighborKey);
-                }
+                gScore.put(neighborKey, tentative);
+                coords.put(neighborKey, neighbor);
+                cameFrom.put(neighborKey, currentKey);
+                open.add(new OpenEntry(neighborKey, tentative, tentative + neighbor.distance(goal), sequence++));
             }
         }
         return null;
+    }
+
+    private static final class OpenEntry {
+        final String key;
+        final double distance;
+        final double estimate;
+        final long sequence;
+
+        OpenEntry(String key, double distance, double estimate, long sequence) {
+            this.key = key;
+            this.distance = distance;
+            this.estimate = estimate;
+            this.sequence = sequence;
+        }
     }
 
     private List<Coordinate> neighbors(Coordinate c, double step, Envelope bounds) {
@@ -795,7 +845,8 @@ public final class GridRoutePlanner {
         }
         LineString segment = gf.createLineString(new Coordinate[] {from, to});
         for (Trace trace : acceptedTraces.values()) {
-            LineString polyline = gf.createLineString(trace.points.toArray(new Coordinate[0]));
+            LineString polyline = trace.polyline;
+            if (!segment.getEnvelopeInternal().intersects(polyline.getEnvelopeInternal())) continue;
             if (!segment.intersects(polyline)) {
                 continue;
             }
@@ -842,11 +893,10 @@ public final class GridRoutePlanner {
             current = cameFrom.get(current);
         }
         Collections.reverse(path);
-        if (path.size() == 1) {
-            // The start point itself is within reach of the goal: keep it as the start.
+        // Preserve the checked grid path. Replacing its last point with the goal
+        // would create an unchecked shortcut from the preceding vertex.
+        if (!path.get(path.size() - 1).equals2D(goal) || path.size() == 1) {
             path.add(goal);
-        } else {
-            path.set(path.size() - 1, goal);
         }
         return path;
     }
