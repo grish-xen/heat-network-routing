@@ -68,6 +68,7 @@ describe('ResultWorkspace', () => {
   it('opens a depth result in the 3D view and keeps map and profile available', async () => {
     renderWorkspace('depth')
 
+    expect(await screen.findByText(/глубинная модель/i)).toBeVisible()
     expect(await screen.findByRole('tab', { name: /3d-сцена/i })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: /карта/i })).toBeEnabled()
     expect(screen.getByRole('tab', { name: /профиль/i })).toBeEnabled()

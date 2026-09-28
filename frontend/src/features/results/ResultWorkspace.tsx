@@ -58,11 +58,14 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
           onSelect={(variant) => setSelectedKey(objectIdKey(variant.variantId))}
         />
         <VariantComparison variant={selected} />
-        {mode === 'depth' && <div className="result-view-tabs" role="tablist" aria-label="Представление результата">
-          <button type="button" role="tab" aria-selected={view === 'map'} onClick={() => setView('map')}>Карта</button>
-          <button type="button" role="tab" aria-selected={view === 'profile'} onClick={() => setView('profile')}>Профиль</button>
-          <button type="button" role="tab" aria-selected={view === '3d'} onClick={() => setView('3d')}>3D-сцена</button>
-        </div>}
+        {mode === 'depth' && <section className="result-depth-controls" aria-label="Режим визуализации глубинной модели">
+          <div className="result-depth-heading"><strong>Глубинная модель</strong><span>Карта, профиль или объёмная сцена трассы</span></div>
+          <div className="result-view-tabs" role="tablist" aria-label="Представление результата">
+            <button type="button" role="tab" aria-selected={view === 'map'} onClick={() => setView('map')}>Карта</button>
+            <button type="button" role="tab" aria-selected={view === 'profile'} onClick={() => setView('profile')}>Профиль</button>
+            <button type="button" role="tab" aria-selected={view === '3d'} onClick={() => setView('3d')}>3D-сцена</button>
+          </div>
+        </section>}
         {mode === 'depth' && paths.length > 1 && <label className="depth-endpoint-selector">
           Конечный потребитель
           <select value={objectIdKey(activePath!.endNodeId)} onChange={(event) => setEndpointKey(event.target.value)}>
