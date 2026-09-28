@@ -7,10 +7,16 @@ vi.mock('./three-adapter', () => ({ createDepthSceneAdapter: vi.fn(() => adapter
 
 import { DepthScene } from './DepthScene'
 
+const segment = {
+  feature: { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: [[37.4, 55.6] as const, [37.41, 55.61] as const] }, properties: { id: { kind: 'string' as const, value: 'edge-1' }, objectType: 'heat_network' as const, diameter: 80 } },
+  start: { x: 0, y: 0, z: -12 }, end: { x: 25, y: 0, z: -13.6 }, depthStart: 3, depthEnd: 3.4,
+  widthM: 0.47, heightM: 0.16, distanceStartM: 0, distanceEndM: 25,
+}
+
 describe('DepthScene', () => {
   it('labels vertical exaggeration and resets the scene view', async () => {
     const user = userEvent.setup()
-    render(<DepthScene segments={[{} as never]} />)
+    render(<DepthScene segments={[segment]} />)
 
     expect(screen.getByText(/вертикальный масштаб ×4/i)).toBeVisible()
     await user.click(screen.getByRole('button', { name: /сбросить ракурс/i }))
@@ -21,5 +27,14 @@ describe('DepthScene', () => {
     render(<DepthScene segments={[]} />)
 
     expect(screen.getByText(/нет участков с глубиной/i)).toBeVisible()
+  })
+
+  it('shows a compact legend and properties for the selected route', () => {
+    render(<DepthScene segments={[segment]} />)
+
+    expect(screen.getByText(/условная поверхность/i)).toBeVisible()
+    expect(screen.getByText(/расчётная оболочка трубы/i)).toBeVisible()
+    expect(screen.getByText('ДУ 80')).toBeVisible()
+    expect(screen.getByText(/3,0–3,4 м/i)).toBeVisible()
   })
 })
