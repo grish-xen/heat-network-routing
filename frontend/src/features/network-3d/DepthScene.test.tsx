@@ -1,11 +1,16 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const adapter = vi.hoisted(() => ({ resetView: vi.fn(), destroy: vi.fn() }))
-vi.mock('./three-adapter', () => ({ createDepthSceneAdapter: vi.fn(() => adapter) }))
+const adapter = vi.hoisted(() => ({ resetView: vi.fn(), destroy: vi.fn(), emitSelect: (_index: number) => undefined }))
+vi.mock('./three-adapter', () => ({ createDepthSceneAdapter: vi.fn((_host: HTMLElement, _segments: unknown, _communications: unknown, options: { onSelect?: (index: number) => void }) => {
+  adapter.emitSelect = (index: number) => options.onSelect?.(index)
+  return adapter
+}) }))
 
 import { DepthScene } from './DepthScene'
+
+beforeEach(() => { adapter.resetView.mockReset(); adapter.destroy.mockReset() })
 
 const segment = {
   feature: { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: [[37.4, 55.6] as const, [37.41, 55.61] as const] }, properties: { id: { kind: 'string' as const, value: 'edge-1' }, objectType: 'heat_network' as const, diameter: 80 } },
@@ -54,5 +59,17 @@ describe('DepthScene', () => {
 
     expect(screen.getByText(/диапазон глубин/i)).toBeVisible()
     expect(screen.getByText(/2,44–3,0 м/i)).toBeVisible()
+  })
+
+  it('shows properties for the selected pipe section and keeps camera reset available', async () => {
+    const user = userEvent.setup()
+    const second = { ...segment, start: { x: 25, y: 0, z: -13.6 }, end: { x: 50, y: 0, z: -12 }, distanceStartM: 25, distanceEndM: 50 }
+    render(<DepthScene segments={[segment, second]} />)
+
+    adapter.emitSelect(1)
+    expect(await screen.findByText(/участок 2/i)).toBeVisible()
+    expect(screen.getByText('ДУ 80')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /сбросить ракурс/i }))
+    expect(adapter.resetView).toHaveBeenCalledTimes(1)
   })
 })

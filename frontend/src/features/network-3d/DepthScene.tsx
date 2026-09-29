@@ -8,15 +8,17 @@ export function DepthScene({ segments, communications = [] }: { readonly segment
   const host = useRef<HTMLDivElement>(null)
   const adapter = useRef<DepthSceneAdapter | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selectedSection, setSelectedSection] = useState(0)
   useEffect(() => {
     if (segments.length === 0) return
     if (!host.current) return
-    try { adapter.current = createDepthSceneAdapter(host.current, segments, communications) }
+    try { adapter.current = createDepthSceneAdapter(host.current, segments, communications, { selectedIndex: selectedSection, onSelect: setSelectedSection }) }
     catch { queueMicrotask(() => setError('3D-сцена недоступна в этом браузере. Откройте карту или профиль.')) }
     return () => { adapter.current?.destroy(); adapter.current = null }
-  }, [segments, communications])
+  }, [segments, communications, selectedSection])
   if (segments.length === 0) return <p className="depth-empty">Нет участков с глубиной для 3D-сцены.</p>
   const first = segments[0]!
+  const selected = segments[selectedSection] ?? first
   const last = segments.at(-1)!
   const depths = segments.flatMap((segment) => [segment.depthStart, segment.depthEnd])
   const depthRange = `${Math.min(...depths).toLocaleString('ru-RU', { minimumFractionDigits: 1 })}–${Math.max(...depths).toLocaleString('ru-RU', { minimumFractionDigits: 1 })} м`
@@ -27,7 +29,7 @@ export function DepthScene({ segments, communications = [] }: { readonly segment
     <div className="depth-scene-canvas" ref={host} />
     <aside className="depth-scene-info" aria-label="Свойства выбранного участка">
       <div className="depth-scene-legend"><span><i className="surface-swatch" />Условная поверхность</span><span><i className="pipe-swatch" />Расчётная оболочка трубы</span>{communications.length > 0 && <span>Коммуникации: {communications.length}</span>}</div>
-      <dl><div><dt>Диапазон глубин</dt><dd>{depthRange}</dd></div><div><dt>Диаметр</dt><dd>ДУ {first.feature.properties.diameter ?? '—'}</dd></div><div><dt>Длина пути</dt><dd>{length} м</dd></div></dl>
+      <dl><div><dt>Участок</dt><dd>Участок {selectedSection + 1}</dd></div><div><dt>Диапазон глубин</dt><dd>{depthRange}</dd></div><div><dt>Диаметр</dt><dd>ДУ {selected.feature.properties.diameter ?? '—'}</dd></div><div><dt>Длина пути</dt><dd>{length} м</dd></div></dl>
     </aside>
   </section>
 }
