@@ -113,25 +113,56 @@ try {
   });
   if (!report.checks.sceneBudget.rejected) report.findings.push({ id: 'scene-budget-counts-features-only',
     message: 'One accepted LineString exceeds the part limit.' });
-  report.checks.combinedBudget = await page.evaluate(async () => {
-    const { loadMapFeatures, MAX_DEPTH_SCENE_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
-    const { buildDepthPaths, toMetricSegments, toSceneCommunications, sceneOrigin } = await import('/src/features/depth-profile/depth-path.ts');
+  // Exercise the real workspace guard. Only map geometry is synthetic; variant
+  // metadata and the downloadable export still come from the real backend job.
+  const budget = await page.evaluate(async job => {
+    const loadedModule = name => {
+      const url = performance.getEntriesByType('resource').map(e => e.name)
+        .find(url => new URL(url).pathname.endsWith(`/node_modules/.vite/deps/${name}.js`));
+      if (!url) throw new Error(`Loaded Vite module not found: ${name}`);
+      return import(url).then(module => ({ ...module.default, ...module }));
+    };
+    const React = await loadedModule('react');
+    const { createRoot } = await loadedModule('react-dom_client');
+    const { QueryClient, QueryClientProvider } = await loadedModule('@tanstack_react-query');
+    const { ResultWorkspace } = await import('/src/features/results/ResultWorkspace.tsx');
+    const { HttpHeatNetworkApi } = await import('/src/shared/api/http-api.ts');
+    const { MAX_DEPTH_SCENE_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
     const parts = Math.floor(MAX_DEPTH_SCENE_FEATURES * 0.6);
     const id = value => ({ kind: 'string', value });
     const geometry = { type: 'LineString', coordinates: Array.from({ length: parts+1 }, (_, i) => [37.4+i*0.000001,55.7]) };
     const input = { type: 'Feature', geometry, properties: { id: id('gas'), objectType: 'restriction', restrictionType: 'gas_pipeline' } };
     const result = { type: 'Feature', geometry, properties: { id: id('pipe'), objectType: 'heat_network', diameter: 80,
       depthStart: 3, depthEnd: 3, startNodeId: id('root'), endNodeId: id('target') } };
-    const api = { getMapPage: async (_job, query) => ({ type: 'FeatureCollection', features: [query.layer === 'input' ? input : result], nextCursor: null }) };
-    const pages = await Promise.all(['input','result'].map(layer => loadMapFeatures(api, 'combined-budget',
-      { layer, bbox: [-180,-90,180,90], limit: 1000 }, new AbortController().signal, MAX_DEPTH_SCENE_FEATURES)));
-    const path = buildDepthPaths(pages[1].features)[0];
-    const routeParts = toMetricSegments(path).length;
-    const communicationParts = toSceneCommunications(pages[0].features, sceneOrigin(path)).length;
-    return { limit: MAX_DEPTH_SCENE_FEATURES, routeParts, communicationParts, total: routeParts + communicationParts };
-  });
-  if (report.checks.combinedBudget.total > report.checks.combinedBudget.limit) report.findings.push({
-    id: 'scene-budget-separate-layers', message: 'Input and result each pass their own limit but exceed one combined scene budget.' });
+    const api = new HttpHeatNetworkApi();
+    api.getMapPage = async (_job, query) => ({ type: 'FeatureCollection',
+      features: [query.layer === 'input' ? input : result], nextCursor: null });
+    const host = document.createElement('div'); host.id = 'd4-budget-probe';
+    document.getElementById('root').hidden = true; document.body.append(host);
+    const root = createRoot(host);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    root.render(React.createElement(QueryClientProvider, { client },
+      React.createElement(ResultWorkspace, { api, jobId: job, mode: 'depth' })));
+    window.d4DisposeBudget = () => { root.unmount(); client.clear(); host.remove(); document.getElementById('root').hidden = false; };
+    return { limit: MAX_DEPTH_SCENE_FEATURES, routeParts: parts, communicationParts: parts, total: parts * 2 };
+  }, jobId);
+  const probe = page.locator('#d4-budget-probe');
+  await probe.getByRole('alert').filter({ hasText: /3D/ }).waitFor();
+  budget.message = await probe.getByRole('alert').innerText();
+  assert.match(budget.message, /Превышен предел объектов/);
+  budget.sceneCanvasCount = await probe.locator('.depth-scene-canvas canvas').count();
+  assert.equal(budget.sceneCanvasCount, 0, 'Over-budget workspace must not create a 3D scene');
+  const downloaded = page.waitForEvent('download');
+  await probe.getByRole('link', { name: /Скачать GeoJSON/i }).click();
+  const download = await downloaded;
+  const downloadedPath = path.join(output, 'd4-budget-download.geojson');
+  await download.saveAs(downloadedPath);
+  const expected = await (await page.request.get(`${base}/api/jobs/${jobId}/result`)).json();
+  assert.deepEqual(JSON.parse(await fs.readFile(downloadedPath, 'utf8')), expected);
+  budget.downloadMatchesBackend = true;
+  report.checks.combinedBudget = budget;
+  await page.screenshot({ path: path.join(output, 'd4-budget-blocked.png'), fullPage: true });
+  await page.evaluate(() => window.d4DisposeBudget());
   assert.deepEqual(report.pageErrors, []);
   if (report.findings.length) process.exitCode = 2;
 } catch (e) {
