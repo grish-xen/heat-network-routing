@@ -37,6 +37,16 @@ export interface DepthSceneSegment {
   readonly distanceEndM: number
 }
 
+export interface DepthSceneOrigin { readonly x: number; readonly y: number }
+export interface DepthSceneCommunication {
+  readonly kind: 'gas_pipeline' | 'power_cable' | 'heat_network'
+  readonly topDepthM: number
+  readonly widthM: number
+  readonly heightM: number
+  readonly start: DepthScenePoint
+  readonly end: DepthScenePoint
+}
+
 function isDepthEdge(feature: MapFeature): feature is MapFeature & { readonly geometry: { readonly type: 'LineString'; readonly coordinates: readonly Position[] } } {
   const { properties } = feature
   return feature.geometry.type === 'LineString' &&
@@ -87,6 +97,38 @@ function metres(position: Position): readonly [number, number] {
   return [point[0]!, point[1]!]
 }
 
+export function sceneOrigin(path: DepthPath): DepthSceneOrigin | undefined {
+  const geometry = path.segments[0]?.feature.geometry
+  if (!geometry || geometry.type !== 'LineString') return undefined
+  const [x, y] = metres(geometry.coordinates[0]!)
+  return { x, y }
+}
+
+export function toSceneCommunications(features: readonly MapFeature[], origin: DepthSceneOrigin): readonly DepthSceneCommunication[] {
+  const rules = new Map(visualizationRules.crossings.map((rule) => [rule.type, rule]))
+  return features.flatMap((feature) => {
+    const geometry = feature.geometry
+    if (geometry.type !== 'LineString') return []
+    const kind = feature.properties.objectType === 'heat_network' ? 'heat_network' : feature.properties.restrictionType
+    if (kind !== 'gas_pipeline' && kind !== 'power_cable' && kind !== 'heat_network') return []
+    const rule = rules.get(kind)
+    if (!rule || !('existingTopDepthM' in rule)) return []
+    const topDepthM = rule.existingTopDepthM
+    if (topDepthM === undefined) return []
+    const dimensions = kind === 'heat_network'
+      ? visualizationRules.diameters.find((item) => item.diameterMm === feature.properties.diameter)
+      : { widthM: rule.profileWidthM, heightM: rule.profileHeightM }
+    if (!dimensions || dimensions.widthM === undefined || dimensions.heightM === undefined) return []
+    const points = geometry.coordinates.map(metres)
+    return points.slice(1).map((end, index) => {
+      const start = points[index]!
+      const z = -topDepthM * VERTICAL_EXAGGERATION
+      return { kind, topDepthM, widthM: dimensions.widthM!, heightM: dimensions.heightM!,
+        start: { x: start[0] - origin.x, y: start[1] - origin.y, z }, end: { x: end[0] - origin.x, y: end[1] - origin.y, z } }
+    })
+  })
+}
+
 function distance(points: readonly (readonly [number, number])[]): number {
   return points.slice(1).reduce((sum, point, index) => {
     const previous = points[index]!
@@ -97,7 +139,7 @@ function distance(points: readonly (readonly [number, number])[]): number {
 export function toMetricSegments(path: DepthPath): readonly DepthSceneSegment[] {
   const first = path.segments[0]?.feature.geometry
   if (!first || first.type !== 'LineString') return []
-  const origin = metres(first.coordinates[0]!)
+  const origin = sceneOrigin(path)!
   let distanceStartM = 0
   return path.segments.flatMap((segment) => {
     const geometry = segment.feature.geometry
@@ -119,8 +161,8 @@ export function toMetricSegments(path: DepthPath): readonly DepthSceneSegment[] 
       const pieceDepthEnd = depthStart + (depthEnd - depthStart) * ratioEnd
       const sceneSegment: DepthSceneSegment = {
         feature: segment.feature,
-        start: { x: start[0] - origin[0], y: start[1] - origin[1], z: -pieceDepthStart * VERTICAL_EXAGGERATION },
-        end: { x: end[0] - origin[0], y: end[1] - origin[1], z: -pieceDepthEnd * VERTICAL_EXAGGERATION },
+        start: { x: start[0] - origin.x, y: start[1] - origin.y, z: -pieceDepthStart * VERTICAL_EXAGGERATION },
+        end: { x: end[0] - origin.x, y: end[1] - origin.y, z: -pieceDepthEnd * VERTICAL_EXAGGERATION },
         depthStart: pieceDepthStart,
         depthEnd: pieceDepthEnd,
         widthM: catalog.widthM,

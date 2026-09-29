@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
 import { ApiClientError } from '../../shared/api/api-error'
-import type { MapFeature, VariantSummary } from '../../shared/model/api'
+import type { MapFeature, MapPage, VariantSummary } from '../../shared/model/api'
 
 const mapMock = vi.hoisted(() => ({ render: vi.fn(), unavailable: false }))
 vi.mock('../network-map/NetworkMap', () => ({
@@ -113,9 +113,9 @@ describe('ResultWorkspace', () => {
     let resolveNewVariant: ((page: { type: 'FeatureCollection'; features: MapFeature[]; nextCursor: null }) => void) | undefined
     const depthApi = apiForDepthMap(vi.fn((_jobId, mapQuery) => {
       if (mapQuery.variantId?.value === 'v2') {
-        return new Promise((resolve) => { resolveNewVariant = resolve })
+        return new Promise<MapPage>((resolve) => { resolveNewVariant = resolve })
       }
-      return Promise.resolve({ type: 'FeatureCollection', features: [
+      return Promise.resolve({ type: 'FeatureCollection' as const, features: [
         depthEdge({ kind: 'string', value: 'старый потребитель' }),
         depthEdge({ kind: 'string', value: 'старый резервный потребитель' }),
       ], nextCursor: null })
@@ -164,7 +164,7 @@ describe('ResultWorkspace', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/не удалось загрузить/i)
     expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
     await user.click(screen.getByRole('button', { name: /повторить загрузку/i }))
-    await waitFor(() => expect(getMapPage).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(getMapPage).toHaveBeenCalledTimes(4))
   })
 
   it('explains the map response size limit for HTTP 413', async () => {

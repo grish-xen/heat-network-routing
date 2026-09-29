@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DepthSceneSegment } from '../depth-profile/depth-path'
 import { buildEnvelopeGeometry, cameraFrame, sceneObjectDescriptors } from './three-adapter'
+import type { DepthSceneCommunication } from '../depth-profile/depth-path'
 
 const segment: DepthSceneSegment = {
   feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[37.4, 55.6], [37.41, 55.61]] }, properties: { id: { kind: 'string', value: 'edge' }, objectType: 'heat_network' } },
@@ -32,5 +33,10 @@ describe('3D scene data', () => {
 
     expect(frame.target.x).toBeCloseTo(-50)
     expect(frame.position.x).toBeLessThan(100)
+  })
+
+  it('describes documented communication envelopes alongside the new pipe', () => {
+    const communication: DepthSceneCommunication = { kind: 'gas_pipeline', topDepthM: 2.8, widthM: 0.4, heightM: 0.4, start: { x: 2, y: -2, z: -11.2 }, end: { x: 2, y: 2, z: -11.2 } }
+    expect(sceneObjectDescriptors([segment], [communication])).toContainEqual(expect.objectContaining({ kind: 'gas_pipeline', widthM: 0.4 }))
   })
 })

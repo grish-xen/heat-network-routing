@@ -1,10 +1,10 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
-import type { DepthSceneSegment } from '../depth-profile/depth-path'
+import type { DepthSceneCommunication, DepthSceneSegment } from '../depth-profile/depth-path'
 
 export interface SceneObjectDescriptor {
-  readonly kind: 'surface' | 'pipe' | 'depth-guide'
+  readonly kind: 'surface' | 'pipe' | 'depth-guide' | DepthSceneCommunication['kind']
   readonly z: number
   readonly widthM?: number
   readonly heightM?: number
@@ -12,11 +12,12 @@ export interface SceneObjectDescriptor {
   readonly opacity?: number
 }
 
-export function sceneObjectDescriptors(segments: readonly DepthSceneSegment[]): readonly SceneObjectDescriptor[] {
+export function sceneObjectDescriptors(segments: readonly DepthSceneSegment[], communications: readonly DepthSceneCommunication[] = []): readonly SceneObjectDescriptor[] {
   return [
     { kind: 'surface', z: 0, opacity: 0.1 },
     ...segments.map((segment) => ({ kind: 'pipe' as const, z: segment.start.z, widthM: segment.widthM, heightM: segment.heightM * 4, color: '#e9582f' })),
     ...segments.flatMap((segment) => [{ kind: 'depth-guide' as const, z: segment.start.z }, { kind: 'depth-guide' as const, z: segment.end.z }]),
+    ...communications.map((communication) => ({ kind: communication.kind, z: communication.start.z, widthM: communication.widthM, heightM: communication.heightM * 4, color: communication.kind === 'gas_pipeline' ? '#e6b44d' : '#7a6ff0', opacity: 0.45 })),
   ]
 }
 
@@ -63,7 +64,7 @@ function dispose(object: THREE.Object3D): void {
   })
 }
 
-export function createDepthSceneAdapter(container: HTMLElement, segments: readonly DepthSceneSegment[]): DepthSceneAdapter {
+export function createDepthSceneAdapter(container: HTMLElement, segments: readonly DepthSceneSegment[], communications: readonly DepthSceneCommunication[] = []): DepthSceneAdapter {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.setSize(container.clientWidth || 640, container.clientHeight || 420)
@@ -100,6 +101,13 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
       guide.computeLineDistances()
       scene.add(guide)
     }
+  }
+  for (const communication of communications) {
+    const mesh = new THREE.Mesh(
+      buildEnvelopeGeometry({ feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] }, properties: { id: { kind: 'string', value: communication.kind }, objectType: 'restriction' } }, start: communication.start, end: communication.end, depthStart: communication.topDepthM, depthEnd: communication.topDepthM, widthM: communication.widthM, heightM: communication.heightM, distanceStartM: 0, distanceEndM: 0 }),
+      new THREE.MeshStandardMaterial({ color: communication.kind === 'gas_pipeline' ? '#e6b44d' : '#7a6ff0', transparent: true, opacity: 0.45, roughness: 0.4 }),
+    )
+    scene.add(mesh)
   }
   let frame = 0
   const render = () => { controls.update(); renderer.render(scene, camera); frame = requestAnimationFrame(render) }

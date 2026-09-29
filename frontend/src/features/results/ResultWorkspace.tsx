@@ -11,7 +11,7 @@ import { NetworkMap } from '../network-map/NetworkMap'
 import { expandBoundsForMapQuery } from '../network-map/map-query'
 import { MAX_DEPTH_SCENE_FEATURES, useMapBounds, useMapFeatureCollections } from '../network-map/use-map-features'
 import { DepthProfile } from '../depth-profile/DepthProfile'
-import { buildDepthPaths, selectDepthPath, toMetricSegments } from '../depth-profile/depth-path'
+import { buildDepthPaths, sceneOrigin, selectDepthPath, toMetricSegments, toSceneCommunications } from '../depth-profile/depth-path'
 import { DepthScene } from '../network-3d/DepthScene'
 import { VariantComparison } from '../variants/VariantComparison'
 import { VariantList } from '../variants/VariantList'
@@ -42,19 +42,25 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
   const depthQueries = useMapFeatureCollections(api, jobId, selected && bounds.data ? [{
     layer: 'result' as const, variantId: selected.variantId, bbox: expandBoundsForMapQuery(bounds.data), limit: 1000,
   }] : [], mode === 'depth', { maxFeatures: MAX_DEPTH_SCENE_FEATURES, keepPreviousData: false })
+  const inputQueries = useMapFeatureCollections(api, jobId, bounds.data ? [{
+    layer: 'input' as const, bbox: expandBoundsForMapQuery(bounds.data), limit: 1000,
+  }] : [], mode === 'depth', { maxFeatures: MAX_DEPTH_SCENE_FEATURES, keepPreviousData: false })
   const paths = buildDepthPaths(depthQueries.flatMap((query) => query.data?.features ?? []))
   const activePath = selectDepthPath(paths, endpointKey)
   const sceneSegments = activePath ? toMetricSegments(activePath) : []
-  const depthLoading = mode === 'depth' && (bounds.isPending || depthQueries.some((query) => query.isPending))
+  const sceneCommunications = activePath && sceneOrigin(activePath)
+    ? toSceneCommunications(inputQueries.flatMap((query) => query.data?.features ?? []), sceneOrigin(activePath)!)
+    : []
+  const depthLoading = mode === 'depth' && (bounds.isPending || depthQueries.some((query) => query.isPending) || inputQueries.some((query) => query.isPending))
   const depthError = mode === 'depth'
-    ? (bounds.isError ? bounds.error : depthQueries.find((query) => query.isError)?.error)
+    ? (bounds.isError ? bounds.error : depthQueries.find((query) => query.isError)?.error ?? inputQueries.find((query) => query.isError)?.error)
     : undefined
   const depthErrorText = depthError instanceof ApiClientError && depthError.status === 413
     ? 'Слишком большой объём данных для профиля и 3D-сцены. Скачайте GeoJSON или сузьте расчёт и повторите загрузку.'
     : 'Не удалось загрузить данные глубинной модели. Попробуйте повторить загрузку.'
   const retryDepth = () => {
     void bounds.refetch()
-    depthQueries.forEach((query) => { void query.refetch() })
+    ;[...depthQueries, ...inputQueries].forEach((query) => { void query.refetch() })
   }
 
   if (variants.isPending) {
@@ -112,7 +118,7 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
         {view !== 'map' && depthLoading && <div className="depth-visualization-state"><Spinner /> Загружаем профиль и 3D-сцену…</div>}
         {view !== 'map' && !depthLoading && depthError && <div className="depth-visualization-state"><Alert>{depthErrorText}</Alert><Button type="button" className="button--secondary" onClick={retryDepth}>Повторить загрузку</Button></div>}
         {view === 'profile' && !depthLoading && !depthError && <DepthProfile segments={sceneSegments} />}
-        {view === '3d' && !depthLoading && !depthError && <DepthScene segments={sceneSegments} />}
+        {view === '3d' && !depthLoading && !depthError && <DepthScene segments={sceneSegments} communications={sceneCommunications} />}
       </section>
     </main>
   )
