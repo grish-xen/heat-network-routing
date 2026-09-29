@@ -23,7 +23,7 @@ jobs:
         run: |
           java -Xmx512m -jar backend/target/heat-network-routing-0.1.0-SNAPSHOT.jar \
             --server.address=127.0.0.1 --server.port=18080 \
-            --heat-network.jobs.storage-directory="$RUNNER_TEMP/smoke-jobs" \
+            --heat-network.jobs.storage-directory="$RUNNER_TEMP/smoke-jobs" --heat-network.jobs.variant-strategies=3 \
             --heat-network.input.storage-directory="$RUNNER_TEMP/smoke-datasets" \
             > "$RUNNER_TEMP/api-smoke-server.log" 2>&1 &
           server_pid=$!
