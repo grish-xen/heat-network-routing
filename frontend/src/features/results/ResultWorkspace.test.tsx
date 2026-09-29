@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
+import { ApiClientError } from '../../shared/api/api-error'
 import type { MapFeature, VariantSummary } from '../../shared/model/api'
 
 const mapMock = vi.hoisted(() => ({ render: vi.fn(), unavailable: false }))
@@ -47,6 +48,13 @@ const depthEdge = (endNodeId: MapFeature['properties']['id']): MapFeature => ({
   },
 })
 
+function apiForDepthMap(getMapPage: HeatNetworkApi['getMapPage']): HeatNetworkApi {
+  const depthApi = api()
+  vi.mocked(depthApi.getMapBounds).mockResolvedValue([37.4, 55.6, 37.42, 55.62])
+  vi.mocked(depthApi.getMapPage).mockImplementation(getMapPage)
+  return depthApi
+}
+
 beforeEach(() => { mapMock.unavailable = false; mapMock.render.mockReset() })
 
 describe('ResultWorkspace', () => {
@@ -84,17 +92,48 @@ describe('ResultWorkspace', () => {
   })
 
   it('labels textual and numeric consumers differently without changing their selection keys', async () => {
-    const depthApi = api()
-    vi.mocked(depthApi.getMapBounds).mockResolvedValue([37.4, 55.6, 37.42, 55.62])
-    vi.mocked(depthApi.getMapPage).mockResolvedValue({
+    const depthApi = apiForDepthMap(vi.fn().mockResolvedValue({
       type: 'FeatureCollection',
       features: [depthEdge({ kind: 'string', value: '1' }), depthEdge({ kind: 'number', value: '1' })],
       nextCursor: null,
-    })
+    }))
 
     renderWorkspace('depth', depthApi)
 
     expect(await screen.findByRole('option', { name: 'строковый «1»' })).toHaveValue('string:1')
     expect(screen.getByRole('option', { name: 'числовой 1' })).toHaveValue('number:1')
+  })
+
+  it('keeps export available while depth geometry is loading', async () => {
+    const depthApi = apiForDepthMap(vi.fn().mockImplementation(() => new Promise(() => undefined)))
+
+    renderWorkspace('depth', depthApi)
+
+    expect(await screen.findByText(/загружаем профиль и 3d/i)).toBeVisible()
+    expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
+  })
+
+  it('explains a failed depth map request and retries it', async () => {
+    const getMapPage = vi.fn()
+      .mockRejectedValueOnce(new Error('gateway failure'))
+      .mockResolvedValue({ type: 'FeatureCollection', features: [], nextCursor: null })
+    const depthApi = apiForDepthMap(getMapPage)
+    const user = userEvent.setup()
+
+    renderWorkspace('depth', depthApi)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/не удалось загрузить/i)
+    expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /повторить загрузку/i }))
+    await waitFor(() => expect(getMapPage).toHaveBeenCalledTimes(2))
+  })
+
+  it('explains the map response size limit for HTTP 413', async () => {
+    const depthApi = apiForDepthMap(vi.fn().mockRejectedValue(new ApiClientError(413, 'MAP_TOO_LARGE', 'too many features')))
+
+    renderWorkspace('depth', depthApi)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/слишком большой объём/i)
+    expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
   })
 })

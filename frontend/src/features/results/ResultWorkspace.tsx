@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
+import { ApiClientError } from '../../shared/api/api-error'
 import type { Job } from '../../shared/model/api'
 import { formatTypedObjectId, objectIdKey } from '../../shared/model/object-id'
 import { Alert } from '../../shared/ui/Alert'
@@ -39,6 +40,17 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
   const paths = buildDepthPaths(depthQueries.flatMap((query) => query.data?.features ?? []))
   const activePath = selectDepthPath(paths, endpointKey)
   const sceneSegments = activePath ? toMetricSegments(activePath) : []
+  const depthLoading = mode === 'depth' && (bounds.isPending || depthQueries.some((query) => query.isPending))
+  const depthError = mode === 'depth'
+    ? (bounds.isError ? bounds.error : depthQueries.find((query) => query.isError)?.error)
+    : undefined
+  const depthErrorText = depthError instanceof ApiClientError && depthError.status === 413
+    ? 'Слишком большой объём данных для профиля и 3D-сцены. Скачайте GeoJSON или сузьте расчёт и повторите загрузку.'
+    : 'Не удалось загрузить данные глубинной модели. Попробуйте повторить загрузку.'
+  const retryDepth = () => {
+    void bounds.refetch()
+    depthQueries.forEach((query) => { void query.refetch() })
+  }
 
   if (variants.isPending) {
     return <main className="result-loading"><Spinner /> Загружаем варианты…</main>
@@ -92,8 +104,10 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
             if (reason === 'GPU_UNAVAILABLE') setMapUnavailable(true)
           }}
         />}
-        {view === 'profile' && <DepthProfile segments={sceneSegments} />}
-        {view === '3d' && <DepthScene segments={sceneSegments} />}
+        {view !== 'map' && depthLoading && <div className="depth-visualization-state"><Spinner /> Загружаем профиль и 3D-сцену…</div>}
+        {view !== 'map' && !depthLoading && depthError && <div className="depth-visualization-state"><Alert>{depthErrorText}</Alert><Button type="button" className="button--secondary" onClick={retryDepth}>Повторить загрузку</Button></div>}
+        {view === 'profile' && !depthLoading && !depthError && <DepthProfile segments={sceneSegments} />}
+        {view === '3d' && !depthLoading && !depthError && <DepthScene segments={sceneSegments} />}
       </section>
     </main>
   )
