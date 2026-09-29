@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
 import type { Job } from '../../shared/model/api'
-import { objectIdKey } from '../../shared/model/object-id'
+import { formatTypedObjectId, objectIdKey } from '../../shared/model/object-id'
 import { Alert } from '../../shared/ui/Alert'
 import { Button } from '../../shared/ui/Button'
 import { Spinner } from '../../shared/ui/Spinner'
@@ -69,7 +69,7 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
         {mode === 'depth' && paths.length > 1 && <label className="depth-endpoint-selector">
           Конечный потребитель
           <select value={objectIdKey(activePath!.endNodeId)} onChange={(event) => setEndpointKey(event.target.value)}>
-            {paths.map((path) => <option key={objectIdKey(path.endNodeId)} value={objectIdKey(path.endNodeId)}>{path.endNodeId.value}</option>)}
+            {paths.map((path) => <option key={objectIdKey(path.endNodeId)} value={objectIdKey(path.endNodeId)}>{formatTypedObjectId(path.endNodeId)}</option>)}
           </select>
         </label>}
         {mapUnavailable && <Alert>Карта недоступна без WebGL2. Сравнение вариантов и файл результата остаются доступны.</Alert>}

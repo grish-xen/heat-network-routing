@@ -1,4 +1,5 @@
 import type { DepthSceneSegment } from './depth-path'
+import { objectIdKey } from '../../shared/model/object-id'
 
 interface DepthProfileProps {
   readonly segments: readonly DepthSceneSegment[]
@@ -28,8 +29,8 @@ export function DepthProfile({ segments }: DepthProfileProps) {
         <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} className="depth-profile-axis" />
         <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} className="depth-profile-axis" />
         <polyline points={points} className="depth-profile-line" />
-        {segments.map((segment) => (
-          <g key={segment.feature.properties.id.value}>
+        {segments.map((segment, index) => (
+          <g key={`${objectIdKey(segment.feature.properties.id)}:${index}`}>
             <circle cx={x(segment.distanceStartM)} cy={y(segment.depthStart)} r="4" className="depth-profile-point" />
           </g>
         ))}

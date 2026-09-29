@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DepthSceneSegment } from './depth-path'
 import { DepthProfile } from './DepthProfile'
@@ -11,6 +11,8 @@ const segment: DepthSceneSegment = {
 }
 
 describe('DepthProfile', () => {
+  afterEach(() => vi.restoreAllMocks())
+
   it('shows a selected route with horizontal-distance and depth axes', () => {
     render(<DepthProfile segments={[segment]} />)
 
@@ -19,5 +21,20 @@ describe('DepthProfile', () => {
     expect(screen.getByText(/глубина, м/i)).toBeVisible()
     expect(screen.getByText('3,0 м')).toBeVisible()
     expect(screen.getByText('3,4 м')).toBeVisible()
+  })
+
+  it('uses distinct React keys for parts of one polyline', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const secondPart: DepthSceneSegment = {
+      ...segment,
+      start: segment.end,
+      end: { x: 40, y: 10, z: -12 },
+      distanceStartM: 20,
+      distanceEndM: 42,
+    }
+
+    render(<DepthProfile segments={[segment, secondPart]} />)
+
+    expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/i)
   })
 })

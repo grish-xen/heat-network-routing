@@ -5,3 +5,7 @@ export type ObjectId =
 export const objectIdKey = (id: ObjectId): string => `${id.kind}:${id.value}`
 
 export const formatObjectId = (id: ObjectId): string => id.value
+
+export const formatTypedObjectId = (id: ObjectId): string => id.kind === 'string'
+  ? `строковый «${id.value}»`
+  : `числовой ${id.value}`
