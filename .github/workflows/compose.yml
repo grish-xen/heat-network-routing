@@ -53,8 +53,10 @@ jobs:
           }
           trap cleanup EXIT
           ready() {
+            # The API is checked through the frontend nginx proxy (port 8081), as a user reaches it.
             for attempt in {1..90}; do
-              if curl --silent --fail --max-time 2 http://127.0.0.1:8080/api/health > /dev/null; then return; fi
+              if curl --silent --fail --max-time 2 http://127.0.0.1:8080/api/health > /dev/null \
+                && curl --silent --fail --max-time 2 http://127.0.0.1:8081/api/health > /dev/null; then return; fi
               sleep 1
             done
             compose logs --no-color
@@ -62,12 +64,15 @@ jobs:
           }
           compose version
           compose config --quiet
-          compose build backend
+          compose build backend frontend
           compose up -d
           ready
           compose exec -T backend java -version
-          python scripts/check_restart_api.py capture --snapshot "$RUNNER_TEMP/restart-snapshot.json" \
-            --report "$RUNNER_TEMP/restart-capture.json"
+          curl --silent --fail http://127.0.0.1:8081/ | grep -q '<div id="root">'
+          curl --silent --fail http://127.0.0.1:8081/v3/api-docs | grep -q '"openapi"'
+          # Uploads, downloads and map pages go through nginx: this checks the streaming proxy end to end.
+          python scripts/check_restart_api.py capture --base-url http://127.0.0.1:8081 \
+            --snapshot "$RUNNER_TEMP/restart-snapshot.json" --report "$RUNNER_TEMP/restart-capture.json"
           before=$(compose ps -q backend)
           volume_before=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/heat-network/jobs"}}{{.Name}}{{end}}{{end}}' "$before")
           test -n "$volume_before"
@@ -78,8 +83,8 @@ jobs:
           test "$before" != "$after"
           volume_after=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/heat-network/jobs"}}{{.Name}}{{end}}{{end}}' "$after")
           test "$volume_before" = "$volume_after"
-          python scripts/check_restart_api.py verify --snapshot "$RUNNER_TEMP/restart-snapshot.json" \
-            --report "$RUNNER_TEMP/restart-verify.json"
+          python scripts/check_restart_api.py verify --base-url http://127.0.0.1:8081 \
+            --snapshot "$RUNNER_TEMP/restart-snapshot.json" --report "$RUNNER_TEMP/restart-verify.json"
           # Job metadata lives in PostgreSQL: the captured jobs and their summaries must be rows there.
           jobs=$(compose exec -T db psql -U heat_network -d heat_network -tAc "SELECT COUNT(*) FROM heat_jobs")
           succeeded=$(compose exec -T db psql -U heat_network -d heat_network -tAc \

@@ -17,6 +17,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    # Web interface: http://127.0.0.1:8081 by default. FRONTEND_BIND=0.0.0.0 opens it to other hosts.
+    ports:
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-8081}:80"
+    depends_on:
+      - backend
   db:
     image: postgres:16-alpine
     environment:
