@@ -160,8 +160,9 @@ class RoutingModuleTest {
         }
     }
 
-    @Test
-    void branchingConnectsMoreTargetsThanTheRootHasFreeAdjacencies() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(Model.Mode.class)
+    void branchingConnectsMoreTargetsThanTheRootHasFreeAdjacencies(Model.Mode mode) {
         List<InputObject> objects = List.of(
                 line("L", 400, new Coordinate(-100, 0), new Coordinate(0, 0)),
                 chamber("C", new Coordinate(0, 0)),
@@ -175,11 +176,25 @@ class RoutingModuleTest {
         ru.hackathon.heatnetwork.calculation.DefaultVariantCalculator calculator =
                 new ru.hackathon.heatnetwork.calculation.DefaultVariantCalculator(rules,
                         new DefaultSpatialValidator(rules));
-        GridRoutePlanner planner = new GridRoutePlanner(data, twoD(100), rules);
+        SearchOptions options = twoD(100);
+        options.mode = mode;
+        GridRoutePlanner planner = new GridRoutePlanner(data, options, rules);
         Model.RouteCandidate best = null;
         Optional<Model.RouteCandidate> next;
         while ((next = planner.next()).isPresent()) {
-            Evaluation evaluation = calculator.evaluate(data, next.get(), Model.Mode.TWO_D);
+            for (Model.Edge parent : next.get().edges) {
+                for (Model.Edge child : next.get().edges) {
+                    if (!parent.toNodeId.equals(child.fromNodeId)) continue;
+                    Coordinate[] p = parent.geometry.getCoordinates();
+                    Coordinate[] c = child.geometry.getCoordinates();
+                    double ax = p[p.length - 1].x - p[p.length - 2].x;
+                    double ay = p[p.length - 1].y - p[p.length - 2].y;
+                    double bx = c[1].x - c[0].x, by = c[1].y - c[0].y;
+                    assertTrue(ax * bx + ay * by >= -1e-9,
+                            "search must respect the incoming direction at " + child.fromNodeId);
+                }
+            }
+            Evaluation evaluation = calculator.evaluate(data, next.get(), mode);
             planner.feedback(evaluation);
             if (evaluation.accepted()) best = next.get();
         }
@@ -210,6 +225,39 @@ class RoutingModuleTest {
                     "edge must have positive length");
         }
         planner.close();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(Model.Mode.class)
+    void branchSearchDoesNotStartWithABackwardTurn(Model.Mode mode) {
+        // Three existing adjacencies leave just one new root edge. The smaller
+        // target is behind the nearest bend of the first accepted trace.
+        InMemoryDataset data = new InMemoryDataset(List.of(
+                line("west", 300, new Coordinate(-100, 0), new Coordinate(0, 0)),
+                line("south", 300, new Coordinate(0, -100), new Coordinate(0, 0)),
+                line("southwest", 300, new Coordinate(-100, -100), new Coordinate(0, 0)),
+                chamber("root", new Coordinate(0, 0)),
+                connectionPoint("first", 20, new Coordinate(100, 300)),
+                connectionPoint("behind", 10, new Coordinate(35, 105))));
+        SearchOptions options = twoD(30); options.mode = mode;
+        RulesCatalog rules = RulesCatalog.loadDefault();
+        var calculator = new ru.hackathon.heatnetwork.calculation.DefaultVariantCalculator(
+                rules, new DefaultSpatialValidator(rules));
+        boolean complete = false;
+        GridRoutePlanner planner = new GridRoutePlanner(data, options, rules);
+        try {
+            Optional<Model.RouteCandidate> next;
+            while ((next = planner.next()).isPresent()) {
+                Evaluation evaluation = calculator.evaluate(data, next.get(), mode);
+                assertTrue(evaluation.diagnostics.stream().noneMatch(d -> "TURN_VIOLATION".equals(d.code)),
+                        "search must account for the parent direction before choosing the first branch step");
+                planner.feedback(evaluation);
+                if (evaluation.accepted() && next.get().unconnectedPointIds.isEmpty()) complete = true;
+            }
+        } finally {
+            planner.close();
+        }
+        assertTrue(complete, "both targets must connect using a permitted branch turn");
     }
 
     @Test
