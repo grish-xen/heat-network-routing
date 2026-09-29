@@ -29,6 +29,17 @@ describe('loadMapFeatures', () => {
     expect(result.features).toHaveLength(2)
   })
 
+  it('rejects a cursor stream once its cumulative feature count exceeds the configured cap', async () => {
+    const getMapPage = vi.fn()
+      .mockResolvedValueOnce({ type: 'FeatureCollection', features: [feature('a'), feature('b')], nextCursor: 'page-2' })
+      .mockResolvedValueOnce({ type: 'FeatureCollection', features: [feature('c')], nextCursor: 'page-3' })
+    const api = apiWith(getMapPage)
+
+    await expect(loadMapFeatures(api, 'job-1', query, new AbortController().signal, 2)).rejects.toThrow(/предел.*объект/i)
+
+    expect(getMapPage).toHaveBeenCalledTimes(2)
+  })
+
   it('does not request a later cursor after abort', async () => {
     const controller = new AbortController()
     const getMapPage = vi.fn().mockImplementation(async () => {

@@ -9,7 +9,7 @@ import { Button } from '../../shared/ui/Button'
 import { Spinner } from '../../shared/ui/Spinner'
 import { NetworkMap } from '../network-map/NetworkMap'
 import { expandBoundsForMapQuery } from '../network-map/map-query'
-import { useMapBounds, useMapFeatureCollections } from '../network-map/use-map-features'
+import { MAX_DEPTH_SCENE_FEATURES, useMapBounds, useMapFeatureCollections } from '../network-map/use-map-features'
 import { DepthProfile } from '../depth-profile/DepthProfile'
 import { buildDepthPaths, selectDepthPath, toMetricSegments } from '../depth-profile/depth-path'
 import { DepthScene } from '../network-3d/DepthScene'
@@ -36,7 +36,7 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
   const bounds = useMapBounds(api, jobId, selected?.variantId)
   const depthQueries = useMapFeatureCollections(api, jobId, selected && bounds.data ? [{
     layer: 'result' as const, variantId: selected.variantId, bbox: expandBoundsForMapQuery(bounds.data), limit: 1000,
-  }] : [], mode === 'depth')
+  }] : [], mode === 'depth', { maxFeatures: MAX_DEPTH_SCENE_FEATURES })
   const paths = buildDepthPaths(depthQueries.flatMap((query) => query.data?.features ?? []))
   const activePath = selectDepthPath(paths, endpointKey)
   const sceneSegments = activePath ? toMetricSegments(activePath) : []

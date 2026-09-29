@@ -6,6 +6,12 @@ import type { ObjectId } from '../../shared/model/object-id'
 import { objectIdKey } from '../../shared/model/object-id'
 import { mapQueryKey, serializeBbox } from './map-query'
 
+export const MAX_DEPTH_SCENE_FEATURES = 2_000
+
+interface MapFeatureCollectionOptions {
+  readonly maxFeatures?: number
+}
+
 function abortIfNeeded(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException('Запрос карты отменён', 'AbortError')
 }
@@ -15,12 +21,16 @@ export async function loadMapFeatures(
   jobId: string,
   query: MapQuery,
   signal: AbortSignal,
+  maxFeatures?: number,
 ): Promise<MapPage> {
   const [minLon, minLat, maxLon, maxLat] = query.bbox
   serializeBbox({ minLon, minLat, maxLon, maxLat })
   const limit = query.limit ?? 1000
   if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
     throw new Error('Размер страницы карты должен быть от 1 до 5000')
+  }
+  if (maxFeatures !== undefined && (!Number.isInteger(maxFeatures) || maxFeatures < 1)) {
+    throw new Error('Предел объектов карты должен быть положительным целым числом')
   }
   const features: MapPage['features'][number][] = []
   const seenCursors = new Set<string>()
@@ -29,6 +39,9 @@ export async function loadMapFeatures(
     abortIfNeeded(signal)
     const page = await api.getMapPage(jobId, { ...query, cursor }, signal)
     abortIfNeeded(signal)
+    if (maxFeatures !== undefined && features.length + page.features.length > maxFeatures) {
+      throw new Error(`Превышен предел объектов для глубинной сцены: ${maxFeatures}`)
+    }
     features.push(...page.features)
     cursor = page.nextCursor ?? undefined
     if (cursor) {
@@ -64,11 +77,12 @@ export function useMapFeatureCollections(
   jobId: string,
   queries: readonly MapQuery[],
   enabled = true,
+  options: MapFeatureCollectionOptions = {},
 ) {
   return useQueries({
     queries: queries.map((query) => ({
       queryKey: mapQueryKey(jobId, query),
-      queryFn: ({ signal }: { signal: AbortSignal }) => loadMapFeatures(api, jobId, query, signal),
+      queryFn: ({ signal }: { signal: AbortSignal }) => loadMapFeatures(api, jobId, query, signal, options.maxFeatures),
       placeholderData: (previous: MapPage | undefined) => previous,
       enabled,
     })),
