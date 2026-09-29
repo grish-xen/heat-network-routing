@@ -8,9 +8,10 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       HEATNETWORK_JOBS_STORAGEDIRECTORY: /var/lib/heat-network/jobs
-      DB_URL: jdbc:postgresql://db:5432/heat_network
-      DB_USER: heat_network
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      # Job statuses and variant summaries are stored in PostgreSQL; large files stay in job-data.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/heat_network
+      SPRING_DATASOURCE_USERNAME: heat_network
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
     volumes:
       - job-data:/var/lib/heat-network/jobs
     depends_on:

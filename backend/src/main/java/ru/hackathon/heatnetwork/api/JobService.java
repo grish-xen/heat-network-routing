@@ -47,6 +47,18 @@ public final class JobService implements DisposableBean {
 
     public JobService(InputParser parser, ObjectMapper mapper, JobProperties properties,
                       CalculationCoordinator coordinator, ResultExporter exporter) throws IOException {
+        this(parser, mapper, properties, coordinator, exporter, (JobRecords) null);
+    }
+
+    /** {@code records}: job metadata in PostgreSQL when configured, otherwise JSON files in the storage directory. */
+    @org.springframework.beans.factory.annotation.Autowired
+    JobService(InputParser parser, ObjectMapper mapper, JobProperties properties, CalculationCoordinator coordinator,
+               ResultExporter exporter, org.springframework.beans.factory.ObjectProvider<JobRecords> records) throws IOException {
+        this(parser, mapper, properties, coordinator, exporter, records.getIfAvailable());
+    }
+
+    JobService(InputParser parser, ObjectMapper mapper, JobProperties properties,
+               CalculationCoordinator coordinator, ResultExporter exporter, JobRecords records) throws IOException {
         this.parser = parser;
         this.coordinator = coordinator;
         this.exporter = exporter;
@@ -54,7 +66,7 @@ public final class JobService implements DisposableBean {
         if (properties.getRetention().isNegative() || properties.getRetention().isZero()) {
             throw new IllegalArgumentException("Job retention must be positive");
         }
-        store = new FileJobStore(properties.getStorageDirectory(), mapper);
+        store = new FileJobStore(properties.getStorageDirectory(), mapper, records);
         try { store.recover(); } catch (IOException | RuntimeException exception) {
             store.close();
             throw exception;

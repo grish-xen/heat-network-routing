@@ -80,6 +80,14 @@ jobs:
           test "$volume_before" = "$volume_after"
           python scripts/check_restart_api.py verify --snapshot "$RUNNER_TEMP/restart-snapshot.json" \
             --report "$RUNNER_TEMP/restart-verify.json"
+          # Job metadata lives in PostgreSQL: the captured jobs and their summaries must be rows there.
+          jobs=$(compose exec -T db psql -U heat_network -d heat_network -tAc "SELECT COUNT(*) FROM heat_jobs")
+          succeeded=$(compose exec -T db psql -U heat_network -d heat_network -tAc \
+            "SELECT COUNT(DISTINCT j.job_id) FROM heat_jobs j JOIN heat_job_variants v ON v.job_id = j.job_id WHERE j.status = 'SUCCEEDED'")
+          echo "PostgreSQL: $jobs jobs, $succeeded succeeded with summaries"
+          test "$jobs" -ge 4
+          test "$succeeded" -ge 2
+          test -z "$(compose exec -T backend sh -c 'ls /var/lib/heat-network/jobs/*.json 2>/dev/null')"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
