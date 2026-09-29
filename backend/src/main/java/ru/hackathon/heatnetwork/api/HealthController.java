@@ -9,7 +9,8 @@ import ru.hackathon.heatnetwork.model.Model;
 public class HealthController {
     @GetMapping("/api/health")
     public Map<String, String> health() {
+        // Calculation modes served by this backend.
         return Map.of("status", "UP", "contractVersion", Model.CONTRACT_VERSION,
-                "implementation", "skeleton");
+                "implementation", "2d+depth");
     }
 }
