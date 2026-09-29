@@ -38,4 +38,21 @@ describe('DepthScene', () => {
     expect(screen.getByText('ДУ 80')).toBeVisible()
     expect(screen.getByText(/3,0–3,4 м/i)).toBeVisible()
   })
+
+  it('shows the full depth range including interior sections', () => {
+    const interior = {
+      ...segment,
+      start: { x: 25, y: 0, z: -9.76 },
+      end: { x: 50, y: 0, z: -12 },
+      depthStart: 2.44,
+      depthEnd: 3,
+      distanceStartM: 25,
+      distanceEndM: 50,
+    }
+
+    render(<DepthScene segments={[{ ...segment, depthEnd: 3 }, interior, { ...segment, start: interior.end, end: { x: 75, y: 0, z: -12 }, depthEnd: 3, distanceStartM: 50, distanceEndM: 75 }]} />)
+
+    expect(screen.getByText(/диапазон глубин/i)).toBeVisible()
+    expect(screen.getByText(/2,44–3,0 м/i)).toBeVisible()
+  })
 })

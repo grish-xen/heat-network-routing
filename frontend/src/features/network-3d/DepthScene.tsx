@@ -18,7 +18,8 @@ export function DepthScene({ segments }: { readonly segments: readonly DepthScen
   if (segments.length === 0) return <p className="depth-empty">Нет участков с глубиной для 3D-сцены.</p>
   const first = segments[0]!
   const last = segments.at(-1)!
-  const depthRange = `${first.depthStart.toLocaleString('ru-RU', { minimumFractionDigits: 1 })}–${last.depthEnd.toLocaleString('ru-RU', { minimumFractionDigits: 1 })} м`
+  const depths = segments.flatMap((segment) => [segment.depthStart, segment.depthEnd])
+  const depthRange = `${Math.min(...depths).toLocaleString('ru-RU', { minimumFractionDigits: 1 })}–${Math.max(...depths).toLocaleString('ru-RU', { minimumFractionDigits: 1 })} м`
   const length = Math.round(last.distanceEndM - first.distanceStartM)
   if (error) return <p className="depth-empty" role="alert">{error}</p>
   return <section className="depth-scene" aria-label="3D-сцена тепловой сети">
@@ -26,7 +27,7 @@ export function DepthScene({ segments }: { readonly segments: readonly DepthScen
     <div className="depth-scene-canvas" ref={host} />
     <aside className="depth-scene-info" aria-label="Свойства выбранного участка">
       <div className="depth-scene-legend"><span><i className="surface-swatch" />Условная поверхность</span><span><i className="pipe-swatch" />Расчётная оболочка трубы</span></div>
-      <dl><div><dt>Глубина</dt><dd>{depthRange}</dd></div><div><dt>Диаметр</dt><dd>ДУ {first.feature.properties.diameter ?? '—'}</dd></div><div><dt>Длина пути</dt><dd>{length} м</dd></div></dl>
+      <dl><div><dt>Диапазон глубин</dt><dd>{depthRange}</dd></div><div><dt>Диаметр</dt><dd>ДУ {first.feature.properties.diameter ?? '—'}</dd></div><div><dt>Длина пути</dt><dd>{length} м</dd></div></dl>
     </aside>
   </section>
 }
