@@ -271,7 +271,7 @@ class RoutingModuleTest {
 
         SearchOptions joint = twoD(1);
         SearchOptions lineTies = twoD(1);
-        lineTies.seed = 1;
+        lineTies.seed = 3;
         Model.RouteCandidate viaChamber = drain(new GridRoutePlanner(new InMemoryDataset(objects), joint, null)).get(0);
         Model.RouteCandidate viaLine = drain(new GridRoutePlanner(new InMemoryDataset(objects), lineTies, null)).get(0);
 
@@ -290,12 +290,86 @@ class RoutingModuleTest {
         objects.add(connectionPoint(2, 5, new Coordinate(400, 60)));    // smaller flow, near
 
         SearchOptions nearFirst = twoD(1);
-        nearFirst.seed = 2;
+        nearFirst.seed = 5;
         Model.RouteCandidate byFlow = drain(new GridRoutePlanner(new InMemoryDataset(objects), twoD(1), null)).get(0);
         Model.RouteCandidate byDistance = drain(new GridRoutePlanner(new InMemoryDataset(objects), nearFirst, null)).get(0);
 
         assertEquals(List.of(numId(2)), byFlow.unconnectedPointIds, "JOINT starts with the larger flow");
         assertEquals(List.of(numId(1)), byDistance.unconnectedPointIds, "NEAR_FIRST starts with the nearest");
+    }
+
+    /** Edge geometries of the last candidate, independent of generated IDs and list order. */
+    private static List<String> edgeShapes(Model.RouteCandidate candidate) {
+        List<String> shapes = new ArrayList<>();
+        for (Model.Edge edge : candidate.edges) {
+            shapes.add(edge.geometry.norm().toText());
+        }
+        shapes.sort(null);
+        return shapes;
+    }
+
+    private static double totalLength(Model.RouteCandidate candidate) {
+        return candidate.edges.stream().mapToDouble(edge -> edge.geometry.getLength()).sum();
+    }
+
+    @Test
+    void resultDoesNotDependOnTheInputOrderOrTheIdFormat() {
+        List<InputObject> named = new ArrayList<>();
+        named.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(600, 0)));
+        named.add(line("L2", 300, new Coordinate(600, 0), new Coordinate(600, 500)));
+        named.add(chamber("C1", new Coordinate(600, 0)));
+        named.add(restriction("park", "park", square(180, 120, 260, 200)));
+        named.add(connectionPoint("A", 20, new Coordinate(220, 320)));
+        named.add(connectionPoint("B", 20, new Coordinate(420, 260)));
+        named.add(connectionPoint("C", 20, new Coordinate(300, 420)));
+        // The same scene with numeric IDs, listed backwards.
+        List<InputObject> numbered = new ArrayList<>();
+        for (int i = named.size() - 1; i >= 0; i--) {
+            InputObject copy = named.get(i);
+            InputObject renamed = new InputObject();
+            renamed.id = numId(100 + i);
+            renamed.type = copy.type;
+            renamed.geometry = copy.geometry;
+            renamed.diameterMm = copy.diameterMm;
+            renamed.flowTph = copy.flowTph;
+            renamed.restrictionType = copy.restrictionType;
+            numbered.add(renamed);
+        }
+        for (long seed : new long[] {0, 1, 3}) {
+            SearchOptions options = twoD(20);
+            options.seed = seed;
+            List<Model.RouteCandidate> first = drain(new GridRoutePlanner(new InMemoryDataset(named), options, null));
+            List<Model.RouteCandidate> second = drain(new GridRoutePlanner(new InMemoryDataset(numbered), options, null));
+            assertEquals(first.size(), second.size(), "seed " + seed);
+            assertEquals(edgeShapes(first.get(first.size() - 1)), edgeShapes(second.get(second.size() - 1)), "seed " + seed);
+        }
+    }
+
+    @Test
+    void cheapestInsertionBranchesFromAnAcceptedTraceInsteadOfALongDirectTrace() {
+        // B's nearest line point lies behind a water body: the direct trace detours around its west end,
+        // while a branch from A's trace, bent by a park, is less than half as long.
+        List<InputObject> objects = new ArrayList<>();
+        objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(1000, 0)));
+        objects.add(restriction("water", "water", square(450, 40, 1000, 60)));
+        objects.add(restriction("park", "park", square(390, 190, 410, 210)));
+        objects.add(connectionPoint("A", 50, new Coordinate(400, 400)));
+        objects.add(connectionPoint("B", 10, new Coordinate(700, 300)));
+
+        SearchOptions base = twoD(20);
+        SearchOptions insertion = twoD(20);
+        insertion.seed = 4;
+        List<Model.RouteCandidate> direct = drain(new GridRoutePlanner(new InMemoryDataset(objects), base, null));
+        List<Model.RouteCandidate> branched = drain(new GridRoutePlanner(new InMemoryDataset(objects), insertion, null));
+        Model.RouteCandidate directLast = direct.get(direct.size() - 1);
+        Model.RouteCandidate branchedLast = branched.get(branched.size() - 1);
+
+        assertTrue(directLast.unconnectedPointIds.isEmpty());
+        assertTrue(branchedLast.unconnectedPointIds.isEmpty());
+        assertEquals(2, directLast.attachments.size(), "the base start ties B to the line directly");
+        assertEquals(1, branchedLast.attachments.size(), "the cheapest insertion branches B from A's trace");
+        assertTrue(totalLength(branchedLast) < totalLength(directLast) - 200,
+                totalLength(branchedLast) + " vs " + totalLength(directLast));
     }
 
     @Test

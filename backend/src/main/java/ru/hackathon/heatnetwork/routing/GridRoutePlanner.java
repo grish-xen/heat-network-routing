@@ -61,6 +61,8 @@ public final class GridRoutePlanner {
     private static final double COINCIDENT_M = 0.001;
     /** Max taps on one branch vertex: 2 (split adjacencies) + 2 taps = 4 total. */
     private static final int MAX_TAPS_PER_VERTEX = 2;
+    /** Cheapest insertion: branch searches compared with a found direct trace, nearest taps first. */
+    private static final int MAX_INSERTION_TAPS = 4;
     /** Final approach into the own OKS polygon: entry sampling, alternatives and the outward corridor. */
     private static final double ENTRY_SAMPLE_M = 1.0;
     private static final double ENTRY_SEPARATION_M = 5.0;
@@ -98,12 +100,69 @@ public final class GridRoutePlanner {
      * nearest to the existing network first, so other consumers branch from different trunks.
      */
     enum Strategy {
-        JOINT, LINE_TIES, NEAR_FIRST;
+        JOINT, LINE_TIES, NEAR_FIRST
+    }
 
-        static Strategy of(long seed) {
-            return values()[(int) Math.floorMod(seed, (long) values().length)];
+    /** Order in which consumers are connected. */
+    enum Order {
+        /** Larger flow first: main corridors are laid by the bigger branches. */
+        FLOW,
+        /** Nearest to the existing network first (larger flow breaks ties). */
+        NEAR_FIRST,
+        /** Farthest from the existing network first: long trunks come first, nearer consumers branch off. */
+        FAR_FIRST,
+        /** A fixed pseudo-random order derived from the seed. */
+        SHUFFLED
+    }
+
+    /**
+     * One start of the multi-start search, selected by {@code SearchOptions.seed}. Seeds 0, 3 and 5 are the
+     * three base strategies. The others connect every consumer the cheapest way: a direct trace from the
+     * network or a branch from an accepted trace, whichever costs less in terms of the score; they differ in
+     * the consumer order. The coordinator keeps the best distinct schemes of all starts; the order of the seeds
+     * puts the starts that most often give the cheapest scheme first, for machines with few processors.
+     */
+    static final class Start {
+        final Strategy strategy;
+        final Order order;
+        final boolean cheapestInsertion;
+        final long seed;
+
+        private Start(Strategy strategy, Order order, boolean cheapestInsertion, long seed) {
+            this.strategy = strategy;
+            this.order = order;
+            this.cheapestInsertion = cheapestInsertion;
+            this.seed = seed;
+        }
+
+        static Start of(long seed) {
+            long s = Math.max(0, seed);
+            switch ((int) Math.min(s, 6)) {
+                case 0: return new Start(Strategy.JOINT, Order.FLOW, false, s);
+                case 1: return new Start(Strategy.JOINT, Order.FAR_FIRST, true, s);
+                case 2: return new Start(Strategy.JOINT, Order.NEAR_FIRST, true, s);
+                case 3: return new Start(Strategy.LINE_TIES, Order.FLOW, false, s);
+                case 4: return new Start(Strategy.JOINT, Order.FLOW, true, s);
+                case 5: return new Start(Strategy.NEAR_FIRST, Order.NEAR_FIRST, false, s);
+                default: return new Start(Strategy.JOINT, Order.SHUFFLED, true, s);
+            }
         }
     }
+
+    /**
+     * The result must not depend on the order of objects in the input file or on the format of their IDs:
+     * the planner works on the objects in the order of their geometry (then flow, restriction type and ID
+     * for coinciding geometry).
+     */
+    private static final Comparator<InputObject> CANONICAL_ORDER = Comparator
+            .comparing((InputObject o) -> o.type)
+            .thenComparing((a, b) -> a.geometry == null || b.geometry == null
+                    ? Boolean.compare(a.geometry == null, b.geometry == null) : a.geometry.compareTo(b.geometry))
+            .thenComparing(o -> o.flowTph, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparing(o -> o.restrictionType, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparing(o -> String.valueOf(o.id == null ? null : o.id.value()));
+
+    private final Start start;
     private final List<ObjectId> orderedTargets;
     private final Map<ObjectId, Integer> targetOrderIndex = new HashMap<>();
 
@@ -216,7 +275,8 @@ public final class GridRoutePlanner {
         this.mode = options.mode;
         if (mode == null) throw new IllegalArgumentException("Search mode is required");
         this.maxCandidates = Math.max(1, options.maxCandidates);
-        this.strategy = Strategy.of(options.seed);
+        this.start = Start.of(options.seed);
+        this.strategy = start.strategy;
 
         List<InputObject> objects = new ArrayList<>();
         for (InputType type : InputType.values()) {
@@ -224,6 +284,7 @@ public final class GridRoutePlanner {
                 stream.forEach(objects::add);
             }
         }
+        objects.sort(CANONICAL_ORDER);
         this.context = RoutingContext.build(objects, this.catalog, guessSearchDiameter(objects, this.catalog));
 
         for (RoutingContext.Target target : context.targets()) {
@@ -233,29 +294,29 @@ public final class GridRoutePlanner {
         for (RoutingContext.Target target : context.targets()) {
             ids.add(target.id);
         }
-        // Deterministic: larger flow first — main corridors are laid by the bigger branches.
-        // NEAR_FIRST: nearest to the existing network first (larger flow breaks ties).
+        // Deterministic for a start: see Order. Larger flow breaks ties.
         Map<ObjectId, Double> networkDistance = new HashMap<>();
-        if (strategy == Strategy.NEAR_FIRST) {
-            for (RoutingContext.Target target : context.targets()) {
-                double nearest = Double.POSITIVE_INFINITY;
-                for (RoutingContext.HeatLine line : context.existingLines()) {
-                    nearest = Math.min(nearest, line.line.distance(target.point));
-                }
-                networkDistance.put(target.id, nearest);
+        for (RoutingContext.Target target : context.targets()) {
+            double nearest = Double.POSITIVE_INFINITY;
+            for (RoutingContext.HeatLine line : context.existingLines()) {
+                nearest = Math.min(nearest, line.line.distance(target.point));
             }
+            networkDistance.put(target.id, nearest);
         }
         ids.sort((a, b) -> {
-            if (strategy == Strategy.NEAR_FIRST) {
+            if (start.order == Order.NEAR_FIRST || start.order == Order.FAR_FIRST) {
                 int byDistance = Double.compare(networkDistance.get(a), networkDistance.get(b));
                 if (byDistance != 0) {
-                    return byDistance;
+                    return start.order == Order.NEAR_FIRST ? byDistance : -byDistance;
                 }
             }
             RoutingContext.Target ta = target(a);
             RoutingContext.Target tb = target(b);
             return Double.compare(tb.flowTph, ta.flowTph);
         });
+        if (start.order == Order.SHUFFLED) {
+            Collections.shuffle(ids, new java.util.Random(start.seed));
+        }
         this.orderedTargets = ids;
         for (int i = 0; i < ids.size(); i++) {
             targetOrderIndex.put(ids.get(i), i);
@@ -545,13 +606,103 @@ public final class GridRoutePlanner {
             if (!validOwnOksApproach(path, target) || finalSegmentCrossesTraces(path, null, null)) {
                 continue;
             }
+            if (start.cheapestInsertion && state.stage == 0 && !acceptedTraces.isEmpty()) {
+                double directCost = length(path) * metrePrice(diameter) + (tie.kind == TieKind.EXISTING_CHAMBER
+                        ? catalog.tieInCostRub() : catalog.chamberCost(diameter));
+                Trace branch = cheaperTap(target, state, approach, searchGoals, after, diameter, directCost);
+                if (branch != null) {
+                    // The direct trace stays available to the later stages if the branch is rejected.
+                    state.triedTies.remove(step + ":" + rootKey(tie));
+                    return branch;
+                }
+            }
             return new Trace(target.id, tie, path, rootKey(tie), null, -1);
         }
         return null;
     }
 
+    /**
+     * Cheapest insertion: a branch from an accepted trace replaces the found direct trace when it costs less
+     * (pipe, chamber and the length term of the score). The nearest untried taps are searched while even their
+     * straight distance could still beat the best price; only the chosen tap is marked tried, the others stay
+     * available to the tap stage.
+     */
+    private Trace cheaperTap(RoutingContext.Target target, TargetAttemptState state, Approach approach,
+                             List<Coordinate> searchGoals, Coordinate after, int diameter, double directCost) {
+        Coordinate goal = target.point.getCoordinate();
+        double price = metrePrice(diameter);
+        double chamber = catalog.chamberCost(diameter);
+        double bestCost = directCost;
+        Trace best = null;
+        TapCandidate bestTap = null;
+        int searched = 0;
+        for (TapCandidate tap : tapCandidates(target, state)) {
+            if (searched >= MAX_INSERTION_TAPS || tap.point.distance(goal) * price + chamber >= bestCost) {
+                break;
+            }
+            searched++;
+            Coordinate previous = acceptedTraces.get(tap.parentTargetId).points.get(tap.vertexIndex - 1);
+            List<Coordinate> path = aStar(tap.point, searchGoals, null, diameter, 25.0, null,
+                    tap.parentTargetId, tap.point, previous, after);
+            if (path == null) {
+                continue;
+            }
+            path = withFinalApproach(path, goal, approach);
+            if (!validOwnOksApproach(path, target) || finalSegmentCrossesTraces(path, tap.parentTargetId, tap.point)) {
+                continue;
+            }
+            double cost = length(path) * price + chamber;
+            if (cost < bestCost) {
+                bestCost = cost;
+                bestTap = tap;
+                best = new Trace(target.id, null, path, tap.rootId, tap.parentTargetId, tap.vertexIndex);
+            }
+        }
+        if (bestTap != null) {
+            state.triedTaps.add(bestTap.key);
+        }
+        return best;
+    }
+
+    /**
+     * Price of one metre of new pipe in roubles as the score sees it: the construction rate of the diameter
+     * plus the length term of the score (section 6 of the appendix) converted to roubles.
+     */
+    private double metrePrice(int diameterMm) {
+        RulesCatalog.Ranking ranking = catalog.ranking();
+        double lengthRub = (ranking.lengthWeight / ranking.lengthBaseM) / (ranking.costWeight / ranking.costBaseRub);
+        List<RulesCatalog.DiameterRow> rows = catalog.diameters();
+        RulesCatalog.DiameterRow row = rows.get(rows.size() - 1);
+        for (RulesCatalog.DiameterRow candidate : rows) {
+            if (candidate.diameterMm >= diameterMm) {
+                row = candidate;
+                break;
+            }
+        }
+        return row.newCostRubPerM + lengthRub;
+    }
+
+    private static double length(List<Coordinate> path) {
+        double total = 0.0;
+        for (int i = 1; i < path.size(); i++) {
+            total += path.get(i - 1).distance(path.get(i));
+        }
+        return total;
+    }
+
     /** Nearest untried tap point on any accepted trace; marks it tried. */
     private TapCandidate nextTap(RoutingContext.Target target, TargetAttemptState state) {
+        List<TapCandidate> taps = tapCandidates(target, state);
+        if (taps.isEmpty()) {
+            return null;
+        }
+        TapCandidate best = taps.get(0);
+        state.triedTaps.add(best.key);
+        return best;
+    }
+
+    /** Untried tap points on accepted traces, nearest to the target first. */
+    private List<TapCandidate> tapCandidates(RoutingContext.Target target, TargetAttemptState state) {
         List<TapCandidate> taps = new ArrayList<>();
         Coordinate goal = target.point.getCoordinate();
         for (Trace parentTrace : acceptedTraces.values()) {
@@ -576,13 +727,8 @@ public final class GridRoutePlanner {
                 taps.add(new TapCandidate(v, parentTrace.targetId, i, parentTrace.rootId, key));
             }
         }
-        if (taps.isEmpty()) {
-            return null;
-        }
         taps.sort(Comparator.comparingDouble(t -> t.point.distance(goal)));
-        TapCandidate best = taps.get(0);
-        state.triedTaps.add(best.key);
-        return best;
+        return taps;
     }
 
     /**
