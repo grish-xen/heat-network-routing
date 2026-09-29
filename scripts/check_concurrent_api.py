@@ -14,9 +14,10 @@ import urllib.parse
 from smoke_api import Client, ROOT, require, run
 
 
-def shifted_input(client):
+def shifted_input(client, source):
     # Change test coordinates only. IDs stay identical across jobs to expose shared-state leaks.
-    data = json.loads((ROOT / 'test-data/synthetic/two-consumers/input.geojson').read_text(encoding='utf-8'))
+    require(source.stat().st_size <= 16 * 1024 * 1024, 'Input exceeds 16 MiB smoke-test limit')
+    data = json.loads(source.read_text(encoding='utf-8'))
 
     def shift(coordinates):
         if isinstance(coordinates[0], (int, float)):
@@ -34,6 +35,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url', default='http://127.0.0.1:8080')
     parser.add_argument('--clients', type=int, default=4)
+    parser.add_argument('--mode', choices=('2d', 'depth', 'mixed'), default='2d',
+                        help='mixed alternates 2D and DEPTH between clients')
+    parser.add_argument('--input', type=Path, help='Override small input for all clients; coordinates are shifted')
     parser.add_argument('--timeout', type=float, default=180, help='Polling deadline per job, seconds')
     parser.add_argument('--request-timeout', type=float, default=15)
     parser.add_argument('--report', type=Path, help='Optional JSON report; parent directory must exist')
@@ -43,22 +47,29 @@ def main():
     if any(not math.isfinite(value) or value <= 0 for value in (args.timeout, args.request_timeout)):
         parser.error('Timeouts must be finite and positive')
     api = Client(args.base_url, args.request_timeout)
-    report = {'base_url': args.base_url, 'clients': args.clients, 'passed': False, 'results': []}
+    report = {'base_url': args.base_url, 'clients': args.clients, 'mode': args.mode,
+              'passed': False, 'results': []}
     began = time.monotonic()
     try:
         require(api.request('/api/health')['status'] == 'UP', 'Backend is not UP')
         with tempfile.TemporaryDirectory(prefix='heat-concurrent-') as directory:
             paths = []
+            modes = [('2d' if client % 2 == 0 else 'depth') if args.mode == 'mixed' else args.mode
+                     for client in range(args.clients)]
             for client in range(args.clients):
                 path = Path(directory) / f'client-{client}.geojson'
-                path.write_bytes(shifted_input(client))
+                source = args.input or ROOT / ('test-data/synthetic/depth/gas-below/input.geojson'
+                                              if modes[client] == 'depth'
+                                              else 'test-data/synthetic/two-consumers/input.geojson')
+                path.write_bytes(shifted_input(client, source))
                 paths.append(path)
             start = threading.Barrier(args.clients)
 
             def check(client):
-                item = {'client': client, 'passed': False}
+                item = {'client': client, 'mode': modes[client], 'passed': False}
                 options = SimpleNamespace(base_url=args.base_url, input=paths[client], timeout=args.timeout,
-                                          request_timeout=args.request_timeout, require_full_connection=True)
+                                          request_timeout=args.request_timeout, require_full_connection=True,
+                                          mode=modes[client])
                 started = time.monotonic()
                 try:
                     start.wait(timeout=30)
@@ -67,6 +78,28 @@ def main():
                     original = json.loads(paths[client].read_bytes(), parse_float=Decimal)
                     actual = Client(args.base_url, args.request_timeout).pages(item['job'], 'input')
                     require(actual == original['features'], f'Client {client}: input data belongs to another job or was changed')
+                    expected_targets = {(type(f['properties']['id']).__name__, f['properties']['id'])
+                                        for f in original['features'] if f['properties']['object_type'] == 'oks_connection_point'}
+                    result = api.request(item['job'] + '/result')['features']
+                    targets = {(type(f['properties']['id']).__name__, f['properties']['id']): f['geometry']['coordinates']
+                               for f in original['features'] if f['properties']['object_type'] == 'oks_connection_point'}
+                    for variant in item['variants']:
+                        edges = [f for f in result if f['properties']['object_type'] == 'heat_network'
+                                 and f['properties']['variant_id'] == variant['id']]
+                        ends = {(type(f['properties']['end_node_id']).__name__, f['properties']['end_node_id']) for f in edges}
+                        require(expected_targets <= ends, f'Client {client}: exported routes lost a consumer')
+                        for edge in edges:
+                            end_id = edge['properties']['end_node_id']
+                            target = targets.get((type(end_id).__name__, end_id))
+                            if target is not None:
+                                require(all(abs(a - b) < Decimal('0.000000001') for a, b in
+                                            zip(edge['geometry']['coordinates'][-1][:2], target[:2])),
+                                        f'Client {client}: route endpoint belongs to another input')
+                    # The default gas case exercises nonconstant depth, not just mode labels.
+                    if modes[client] == 'depth' and args.input is None:
+                        depths = {f['properties'][key] for f in result if f['properties']['object_type'] == 'heat_network'
+                                  for key in ('depth_start', 'depth_end')}
+                        require(len(depths) > 1, f'Client {client}: gas case lost its changing depth profile')
                     item['passed'] = True
                 except Exception as error:
                     item['error'] = f'{type(error).__name__}: {error}'
