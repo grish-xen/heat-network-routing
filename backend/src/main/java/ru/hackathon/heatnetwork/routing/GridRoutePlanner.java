@@ -36,8 +36,10 @@ import ru.hackathon.heatnetwork.model.ObjectId;
  *
  * <p>Every connection target gets an A* trace over a regular grid in
  * EPSG:32637. A move is allowed when the segment does not hit buffered forbidden
- * obstacles and stays outside special-pass clearance zones; the target's own OKS
- * polygon is exempt for the final approach (section 2.2). Turn angles above 90° are
+ * obstacles and stays outside special-pass clearance zones. The target's own OKS
+ * polygon is an ordinary obstacle; the search ends in the corridor of one straight
+ * final segment through its nearest reachable boundary (section 2.2, see
+ * docs/OWN_OKS_APPROACH.md). Turn angles above 90° are
  * excluded during expansion, so the trace never needs a camera just to turn back.</p>
  *
  * <p>Tie points: an existing chamber within reach (the 10 m rule is applied to the
