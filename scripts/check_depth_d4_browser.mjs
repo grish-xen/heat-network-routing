@@ -93,29 +93,10 @@ try {
   await page.screenshot({ path: path.join(output, 'd4-mobile-scene.png'), fullPage: true });
   report.checks.mobileScene = true;
 
-  // Isolated adversarial geometry: a single input object can contain many
-  // segments. Do not render it; verify the actual loader/conversion boundary.
-  report.checks.sceneBudget = await page.evaluate(async () => {
-    const { loadMapFeatures, MAX_DEPTH_SCENE_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
-    const { toSceneCommunications } = await import('/src/features/depth-profile/depth-path.ts');
-    const count = MAX_DEPTH_SCENE_FEATURES + 1;
-    const feature = { type: 'Feature', properties: { id: { kind: 'string', value: 'long-gas' }, objectType: 'restriction', restrictionType: 'gas_pipeline' },
-      geometry: { type: 'LineString', coordinates: Array.from({ length: count+1 }, (_, i) => [37.4+i*0.000001,55.7]) } };
-    const api = { getMapPage: async () => ({ type: 'FeatureCollection', features: [feature], nextCursor: null }) };
-    try {
-      const loaded = await loadMapFeatures(api, 'budget-probe', { layer: 'input', bbox: [-180,-90,180,90], limit: 1000 }, new AbortController().signal, MAX_DEPTH_SCENE_FEATURES);
-      return { limit: MAX_DEPTH_SCENE_FEATURES, rejected: false, features: loaded.features.length,
-        meshes: toSceneCommunications(loaded.features, { x: 400000, y: 6170000 }).length };
-    } catch (error) {
-      if (!/2000/.test(error.message)) throw error;
-      return { limit: MAX_DEPTH_SCENE_FEATURES, rejected: true };
-    }
-  });
-  if (!report.checks.sceneBudget.rejected) report.findings.push({ id: 'scene-budget-counts-features-only',
-    message: 'One accepted LineString exceeds the part limit.' });
   // Exercise the real workspace guard. Only map geometry is synthetic; variant
   // metadata and the downloadable export still come from the real backend job.
-  const budget = await page.evaluate(async job => {
+  for (const [name, routeParts, communicationParts] of [['combinedBudget', 1200, 1200], ['longPolylineBudget', 1, 2001]]) {
+  const budget = await page.evaluate(async ({ job, routeParts, communicationParts }) => {
     const loadedModule = name => {
       const url = performance.getEntriesByType('resource').map(e => e.name)
         .find(url => new URL(url).pathname.endsWith(`/node_modules/.vite/deps/${name}.js`));
@@ -128,11 +109,10 @@ try {
     const { ResultWorkspace } = await import('/src/features/results/ResultWorkspace.tsx');
     const { HttpHeatNetworkApi } = await import('/src/shared/api/http-api.ts');
     const { MAX_DEPTH_SCENE_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
-    const parts = Math.floor(MAX_DEPTH_SCENE_FEATURES * 0.6);
     const id = value => ({ kind: 'string', value });
-    const geometry = { type: 'LineString', coordinates: Array.from({ length: parts+1 }, (_, i) => [37.4+i*0.000001,55.7]) };
-    const input = { type: 'Feature', geometry, properties: { id: id('gas'), objectType: 'restriction', restrictionType: 'gas_pipeline' } };
-    const result = { type: 'Feature', geometry, properties: { id: id('pipe'), objectType: 'heat_network', diameter: 80,
+    const geometry = parts => ({ type: 'LineString', coordinates: Array.from({ length: parts+1 }, (_, i) => [37.4+i*0.000001,55.7]) });
+    const input = { type: 'Feature', geometry: geometry(communicationParts), properties: { id: id('gas'), objectType: 'restriction', restrictionType: 'gas_pipeline' } };
+    const result = { type: 'Feature', geometry: geometry(routeParts), properties: { id: id('pipe'), objectType: 'heat_network', diameter: 80,
       depthStart: 3, depthEnd: 3, startNodeId: id('root'), endNodeId: id('target') } };
     const api = new HttpHeatNetworkApi();
     api.getMapPage = async (_job, query) => ({ type: 'FeatureCollection',
@@ -144,8 +124,8 @@ try {
     root.render(React.createElement(QueryClientProvider, { client },
       React.createElement(ResultWorkspace, { api, jobId: job, mode: 'depth' })));
     window.d4DisposeBudget = () => { root.unmount(); client.clear(); host.remove(); document.getElementById('root').hidden = false; };
-    return { limit: MAX_DEPTH_SCENE_FEATURES, routeParts: parts, communicationParts: parts, total: parts * 2 };
-  }, jobId);
+    return { limit: MAX_DEPTH_SCENE_FEATURES, routeParts, communicationParts, total: routeParts + communicationParts };
+  }, { job: jobId, routeParts, communicationParts });
   const probe = page.locator('#d4-budget-probe');
   await probe.getByRole('alert').filter({ hasText: /3D/ }).waitFor();
   budget.message = await probe.getByRole('alert').innerText();
@@ -155,14 +135,15 @@ try {
   const downloaded = page.waitForEvent('download');
   await probe.getByRole('link', { name: /Скачать GeoJSON/i }).click();
   const download = await downloaded;
-  const downloadedPath = path.join(output, 'd4-budget-download.geojson');
+  const downloadedPath = path.join(output, `d4-${name}-download.geojson`);
   await download.saveAs(downloadedPath);
   const expected = await (await page.request.get(`${base}/api/jobs/${jobId}/result`)).json();
   assert.deepEqual(JSON.parse(await fs.readFile(downloadedPath, 'utf8')), expected);
   budget.downloadMatchesBackend = true;
-  report.checks.combinedBudget = budget;
-  await page.screenshot({ path: path.join(output, 'd4-budget-blocked.png'), fullPage: true });
+  report.checks[name] = budget;
+  await page.screenshot({ path: path.join(output, `d4-${name}-blocked.png`), fullPage: true });
   await page.evaluate(() => window.d4DisposeBudget());
+  }
   assert.deepEqual(report.pageErrors, []);
   if (report.findings.length) process.exitCode = 2;
 } catch (e) {

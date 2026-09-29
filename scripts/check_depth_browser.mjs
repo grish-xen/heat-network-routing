@@ -67,7 +67,7 @@ async function depthViews(item) {
     item.depthLoadError = await loadError.innerText();
     item.mapBudgetDiagnostics = await page.evaluate(async ({ jobId, variantId }) => {
       const { HttpHeatNetworkApi } = await import('/src/shared/api/http-api.ts');
-      const { loadMapFeatures, MAX_DEPTH_SCENE_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
+      const { loadMapFeatures, MAX_DEPTH_SCENE_FEATURES, MAX_DEPTH_LOAD_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
       const { expandBoundsForMapQuery } = await import('/src/features/network-map/map-query.ts');
       const { buildDepthPaths, toMetricSegments, toSceneCommunications, sceneOrigin } = await import('/src/features/depth-profile/depth-path.ts');
       const api = new HttpHeatNetworkApi();
@@ -75,7 +75,7 @@ async function depthViews(item) {
       const bbox = expandBoundsForMapQuery(await api.getMapBounds(jobId, id));
       const query = { layer: 'input', bbox, limit: 1000 };
       let boundedInputError = null;
-      try { await loadMapFeatures(api, jobId, query, new AbortController().signal, MAX_DEPTH_SCENE_FEATURES); }
+      try { await loadMapFeatures(api, jobId, query, new AbortController().signal, MAX_DEPTH_LOAD_FEATURES); }
       catch (error) { boundedInputError = error.message; }
       // Diagnostic only, on our fixed competition fixture: read the accepted
       // HTTP pages without the UI's cap, never create GPU geometry from them.
@@ -89,7 +89,7 @@ async function depthViews(item) {
         if (geometry.type === 'MultiPolygon') return geometry.coordinates.reduce((n, rings) => n + rings.reduce((m, p) => m + line(p), 0), 0);
         return 1;
       };
-      return { limit: MAX_DEPTH_SCENE_FEATURES, boundedInputError, inputFeatures: input.features.length,
+      return { limit: MAX_DEPTH_SCENE_FEATURES, loadLimit: MAX_DEPTH_LOAD_FEATURES, boundedInputError, inputFeatures: input.features.length,
         inputGeometryParts: input.features.reduce((n, f) => n + parts(f.geometry), 0),
         routeParts: active ? toMetricSegments(active).length : 0,
         communicationParts: active ? toSceneCommunications(input.features, sceneOrigin(active)).length : 0 };
