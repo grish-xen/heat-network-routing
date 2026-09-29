@@ -261,6 +261,44 @@ class RoutingModuleTest {
     }
 
     @Test
+    void lineTiesStrategyPrefersTheNearestLinePointToAFartherChamber() {
+        // Chamber 224 m from the target, the line point below it 200 m: JOINT takes the chamber
+        // (its approach is shorter than twice the snap distance), LINE_TIES a new chamber on the line.
+        List<InputObject> objects = new ArrayList<>();
+        objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(600, 0)));
+        objects.add(chamber("C1", new Coordinate(400, 0)));
+        objects.add(connectionPoint(1, 10, new Coordinate(500, 200)));
+
+        SearchOptions joint = twoD(1);
+        SearchOptions lineTies = twoD(1);
+        lineTies.seed = 1;
+        Model.RouteCandidate viaChamber = drain(new GridRoutePlanner(new InMemoryDataset(objects), joint, null)).get(0);
+        Model.RouteCandidate viaLine = drain(new GridRoutePlanner(new InMemoryDataset(objects), lineTies, null)).get(0);
+
+        assertEquals(Model.NodeKind.EXISTING_CHAMBER, viaChamber.nodes.stream()
+                .filter(n -> n.id.equals(viaChamber.attachments.get(0).rootNodeId)).findFirst().orElseThrow().kind);
+        assertEquals(Model.NodeKind.NEW_CHAMBER, viaLine.nodes.stream()
+                .filter(n -> n.id.equals(viaLine.attachments.get(0).rootNodeId)).findFirst().orElseThrow().kind);
+        assertEquals(new ObjectId(new TextNode("L1")), viaLine.attachments.get(0).existingObjectId);
+    }
+
+    @Test
+    void nearFirstStrategyConnectsTheConsumerNearestToTheNetworkFirst() {
+        List<InputObject> objects = new ArrayList<>();
+        objects.add(line("L1", 300, new Coordinate(0, 0), new Coordinate(600, 0)));
+        objects.add(connectionPoint(1, 20, new Coordinate(100, 400)));  // larger flow, far
+        objects.add(connectionPoint(2, 5, new Coordinate(400, 60)));    // smaller flow, near
+
+        SearchOptions nearFirst = twoD(1);
+        nearFirst.seed = 2;
+        Model.RouteCandidate byFlow = drain(new GridRoutePlanner(new InMemoryDataset(objects), twoD(1), null)).get(0);
+        Model.RouteCandidate byDistance = drain(new GridRoutePlanner(new InMemoryDataset(objects), nearFirst, null)).get(0);
+
+        assertEquals(List.of(numId(2)), byFlow.unconnectedPointIds, "JOINT starts with the larger flow");
+        assertEquals(List.of(numId(1)), byDistance.unconnectedPointIds, "NEAR_FIRST starts with the nearest");
+    }
+
+    @Test
     void targetNextToTheTiePointGetsATwoPointEdge() {
         // The target is closer than 1.5 grid steps to the snapped tie point on the line.
         List<InputObject> objects = new ArrayList<>();

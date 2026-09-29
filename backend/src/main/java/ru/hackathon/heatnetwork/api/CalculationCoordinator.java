@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.*;
 import org.locationtech.jts.geom.Coordinate;
 import org.springframework.stereotype.Component;
 import ru.hackathon.heatnetwork.calculation.VariantCalculator;
@@ -50,6 +51,100 @@ public final class CalculationCoordinator {
         List<ApiError> rejections = new ArrayList<>();
         interrupted();
         progress.stage(JobView.Stage.ROUTING);
+        options.seed = properties.getSearchSeed();
+        Alternatives alternatives = new Alternatives(dataset, mode);
+        try {
+            int count = search(dataset, options, progress, searchDiagnostics, rejections, best, coverage);
+            interrupted();
+            if (count == options.maxCandidates
+                    && searchDiagnostics.stream().noneMatch(d -> "SEARCH_BUDGET_EXHAUSTED".equals(d.code))) {
+                searchDiagnostics.add(new ApiError("SEARCH_BUDGET_EXHAUSTED",
+                        "Достигнут лимит кандидатов. Это не доказывает невозможность подключения."));
+            }
+            alternatives.collect(best, coverage);
+        } finally {
+            alternatives.close();
+        }
+        if (best.isEmpty()) {
+            rejections.addAll(searchDiagnostics);
+            rejections.add(0, new ApiError("ROUTE_NOT_FOUND", "В пределах бюджета поиска не найден допустимый вариант. Это не доказывает невозможность подключения."));
+            throw new NoValidVariantException(rejections);
+        }
+        List<CalculatedVariant> result = new ArrayList<>();
+        for (Choice choice : best) {
+            // Public IDs belong to this job, independent of the planner's candidate IDs.
+            CalculatedVariant copy = new CalculatedVariant();
+            CalculatedVariant original = choice.variant;
+            copy.variantId = "variant-" + (result.size() + 1);
+            copy.mode = original.mode;
+            copy.nodes = original.nodes;
+            copy.edges = original.edges;
+            copy.attachments = original.attachments;
+            copy.newChambers = original.newChambers;
+            copy.unconnectedPointIds = original.unconnectedPointIds;
+            copy.summary = original.summary;
+            result.add(copy);
+        }
+        return result;
+    }
+
+    /**
+     * The other planner strategies (seed + 1, seed + 2) build their own complete schemes in parallel with the
+     * main one; their best distinct variants are ranked with the main result. They may run at most until the
+     * main search ends plus {@code alternative-timeout}; an unfinished one is interrupted and contributes
+     * nothing. They report no diagnostics: the main strategy alone decides whether the result is complete.
+     */
+    private final class Alternatives implements AutoCloseable {
+        private final ExecutorService pool;
+        private final List<Future<List<CalculatedVariant>>> futures = new ArrayList<>();
+
+        Alternatives(Dataset dataset, Mode mode) {
+            int count = properties.getVariantStrategies() - 1;
+            pool = count <= 0 ? null : Executors.newFixedThreadPool(count, work -> {
+                Thread thread = new Thread(work, "heat-variant-" + UUID.randomUUID());
+                thread.setDaemon(true);
+                return thread;
+            });
+            for (int strategy = 1; strategy <= count; strategy++) {
+                SearchOptions options = new SearchOptions();
+                options.mode = mode;
+                options.maxCandidates = properties.getMaxCandidates();
+                options.seed = properties.getSearchSeed() + strategy;
+                futures.add(pool.submit(() -> {
+                    List<Choice> local = new ArrayList<>();
+                    search(dataset, options, stage -> { }, new ArrayList<>(), new ArrayList<>(), local, new ArrayList<>());
+                    List<CalculatedVariant> variants = new ArrayList<>();
+                    for (Choice choice : local) variants.add(choice.variant);
+                    return variants;
+                }));
+            }
+        }
+
+        void collect(List<Choice> best, List<Set<ObjectId>> coverage) throws IOException {
+            long deadline = System.nanoTime() + properties.getAlternativeTimeout().toNanos();
+            for (Future<List<CalculatedVariant>> future : futures) {
+                try {
+                    long remaining = Math.max(0, deadline - System.nanoTime());
+                    for (CalculatedVariant variant : future.get(remaining, TimeUnit.NANOSECONDS)) {
+                        offer(variant, best, coverage);
+                    }
+                } catch (TimeoutException | ExecutionException | CancellationException skipped) {
+                    future.cancel(true); // an alternative scheme is optional; the main result stands
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new InterruptedIOException("Calculation interrupted");
+                }
+            }
+        }
+
+        @Override public void close() {
+            if (pool != null) pool.shutdownNow();
+        }
+    }
+
+    /** One search session: evaluates candidates, feeds rejections back, keeps the best distinct variants. */
+    private int search(Dataset dataset, SearchOptions options, Progress progress, List<ApiError> searchDiagnostics,
+                       List<ApiError> rejections, List<Choice> best, List<Set<ObjectId>> coverage) throws IOException {
         int count = 0;
         try (RoutePlanner.SearchSession session = planner.open(dataset, options)) {
             for (; count < options.maxCandidates; count++) {
@@ -75,48 +170,32 @@ public final class CalculationCoordinator {
                 if (variant.mode != options.mode) {
                     throw new IllegalStateException("Calculated variant mode differs from requested mode");
                 }
-                Set<ObjectId> missing = new HashSet<>(variant.unconnectedPointIds);
-                if (coverage.stream().anyMatch(old -> missing.size() > old.size() && missing.containsAll(old))) continue;
-                coverage.removeIf(old -> old.size() > missing.size() && old.containsAll(missing));
-                if (!coverage.contains(missing)) coverage.add(missing);
-                best.removeIf(old -> old.missing.size() > missing.size() && old.missing.containsAll(missing));
-                String signature = signature(variant);
-                Choice duplicate = best.stream().filter(old -> old.signature.equals(signature)).findFirst().orElse(null);
-                if (duplicate != null) {
-                    if (duplicate.variant.summary.score.compareTo(variant.summary.score) <= 0) continue;
-                    best.remove(duplicate);
-                }
-                best.add(new Choice(variant, missing, signature));
-                best.sort(Comparator.comparing((Choice c) -> c.variant.summary.score).thenComparing(c -> c.signature));
-                if (best.size() > 3) best.remove(3);
+                offer(variant, best, coverage);
             }
         }
-        interrupted();
-        if (count == options.maxCandidates && searchDiagnostics.stream().noneMatch(d -> "SEARCH_BUDGET_EXHAUSTED".equals(d.code))) {
-            searchDiagnostics.add(new ApiError("SEARCH_BUDGET_EXHAUSTED",
-                    "Достигнут лимит кандидатов. Это не доказывает невозможность подключения."));
+        return count;
+    }
+
+    /**
+     * Keeps the variant among the best three when no kept variant connects all of its consumers and more,
+     * and it is not a copy of a kept one (the cheaper copy wins).
+     */
+    private static void offer(CalculatedVariant variant, List<Choice> best, List<Set<ObjectId>> coverage)
+            throws InterruptedIOException {
+        Set<ObjectId> missing = new HashSet<>(variant.unconnectedPointIds);
+        if (coverage.stream().anyMatch(old -> missing.size() > old.size() && missing.containsAll(old))) return;
+        coverage.removeIf(old -> old.size() > missing.size() && old.containsAll(missing));
+        if (!coverage.contains(missing)) coverage.add(missing);
+        best.removeIf(old -> old.missing.size() > missing.size() && old.missing.containsAll(missing));
+        String signature = signature(variant);
+        Choice duplicate = best.stream().filter(old -> old.signature.equals(signature)).findFirst().orElse(null);
+        if (duplicate != null) {
+            if (duplicate.variant.summary.score.compareTo(variant.summary.score) <= 0) return;
+            best.remove(duplicate);
         }
-        if (best.isEmpty()) {
-            rejections.addAll(searchDiagnostics);
-            rejections.add(0, new ApiError("ROUTE_NOT_FOUND", "В пределах бюджета поиска не найден допустимый вариант. Это не доказывает невозможность подключения."));
-            throw new NoValidVariantException(rejections);
-        }
-        List<CalculatedVariant> result = new ArrayList<>();
-        for (Choice choice : best) {
-            // Public IDs belong to this job, independent of the planner's candidate IDs.
-            CalculatedVariant copy = new CalculatedVariant();
-            CalculatedVariant original = choice.variant;
-            copy.variantId = "variant-" + (result.size() + 1);
-            copy.mode = original.mode;
-            copy.nodes = original.nodes;
-            copy.edges = original.edges;
-            copy.attachments = original.attachments;
-            copy.newChambers = original.newChambers;
-            copy.unconnectedPointIds = original.unconnectedPointIds;
-            copy.summary = original.summary;
-            result.add(copy);
-        }
-        return result;
+        best.add(new Choice(variant, missing, signature));
+        best.sort(Comparator.comparing((Choice c) -> c.variant.summary.score).thenComparing(c -> c.signature));
+        if (best.size() > 3) best.remove(3);
     }
 
     static void interrupted() throws InterruptedIOException {

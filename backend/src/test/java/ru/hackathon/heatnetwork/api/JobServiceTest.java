@@ -130,6 +130,7 @@ class JobServiceTest {
         JobService jobs = realPipeline(new GeoJsonInputParser(datasets), properties());
         String jobId;
         byte[] originalResult;
+        int variantCount;
         try {
             byte[] bytes;
             try (InputStream input = getClass().getResourceAsStream("/fixtures/synthetic/two-consumers/input.geojson")) {
@@ -140,7 +141,9 @@ class JobServiceTest {
             JobView result = terminal(jobs, created.jobId);
             jobId = result.jobId;
             assertEquals(JobView.Status.SUCCEEDED, result.status);
-            assertEquals(1, jobs.variants(jobId).size(), "partial intermediate candidate must be discarded");
+            assertTrue(jobs.variants(jobId).stream().allMatch(view -> view.unconnectedOksIds.isEmpty()),
+                    "partial intermediate candidates must be discarded");
+            variantCount = jobs.variants(jobId).size();
             try (InputStream download = jobs.download(jobId).stream) { originalResult = download.readAllBytes(); }
             try (Stream<Path> files = Files.list(datasets)) { assertEquals(0, files.count()); }
             assertEquals(0, countInputs());
@@ -148,7 +151,7 @@ class JobServiceTest {
         JobService restarted = realPipeline(new GeoJsonInputParser(datasets), properties());
         try {
             assertEquals(JobView.Status.SUCCEEDED, restarted.get(jobId).status);
-            assertEquals(1, restarted.variants(jobId).size());
+            assertEquals(variantCount, restarted.variants(jobId).size());
             try (InputStream download = restarted.download(jobId).stream) { assertArrayEquals(originalResult, download.readAllBytes()); }
             try (MapArchive.Page page = restarted.map(jobId, new MapQuery(jobId, "input", "-180,-90,180,90", null, null, null))) {
                 java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
@@ -263,6 +266,7 @@ class JobServiceTest {
         ru.hackathon.heatnetwork.model.Model.Evaluation evaluation = new ru.hackathon.heatnetwork.model.Model.Evaluation();
         evaluation.variant = variant;
         JobProperties properties = properties();
+        properties.setVariantStrategies(1); // one mocked search session
         JobService jobs = new JobService(path -> dataset, mapper, properties,
                 new CalculationCoordinator((d, o) -> session, (d, c, m) -> evaluation, properties),
                 (d, variants, output) -> {
