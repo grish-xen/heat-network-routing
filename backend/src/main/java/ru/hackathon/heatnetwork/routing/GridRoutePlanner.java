@@ -17,6 +17,7 @@ import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.Point;
+import org.locationtech.jts.operation.distance.DistanceOp;
 import ru.hackathon.heatnetwork.model.Dataset;
 import ru.hackathon.heatnetwork.model.Model.Attachment;
 import ru.hackathon.heatnetwork.model.Model.Edge;
@@ -58,6 +59,25 @@ public final class GridRoutePlanner {
     private static final double COINCIDENT_M = 0.001;
     /** Max taps on one branch vertex: 2 (split adjacencies) + 2 taps = 4 total. */
     private static final int MAX_TAPS_PER_VERTEX = 2;
+    /** Final approach into the own OKS polygon: entry sampling, alternatives and the outward corridor. */
+    private static final double ENTRY_SAMPLE_M = 1.0;
+    private static final double ENTRY_SEPARATION_M = 5.0;
+    private static final int MAX_APPROACHES = 3;
+    private static final double APPROACH_STEP_M = 0.25;
+    private static final double MAX_APPROACH_OFFSET_M = 60.0;
+    private static final double CORRIDOR_SPACING_M = 2.0;
+    /** An approach corridor counts as reachable when the grid leads this far away from the target. */
+    private static final double REACH_RADIUS_M = 200.0;
+    private static final int REACH_BUDGET = 20_000;
+    private static final double REACH_STEP_M = 25.0;
+    /** Tap searches are local: a smaller budget keeps hopeless branch attempts cheap. */
+    private static final int TAP_MAX_EXPANSIONS = 150_000;
+    /**
+     * With an approach corridor, repeated failures at one grid step mean the corridor is out of reach of
+     * that grid, not that the next tie will help: move on to the next stage instead of trying every tie.
+     */
+    private static final int MAX_APPROACH_FAILURES_PER_STAGE = 6;
+    private static final int MAX_APPROACH_TAP_FAILURES = 10;
 
     private final GeometryFactory gf = new GeometryFactory();
     private final Dataset dataset;
@@ -161,9 +181,15 @@ public final class GridRoutePlanner {
         final Set<String> triedTaps = new HashSet<>();
         final Set<String> triedTies = new HashSet<>();
         boolean exhaustedAll = false;
+        /** Index of the way into the own OKS polygon being tried (see findApproaches). */
+        int approachIndex = 0;
+        /** Failed searches towards the approach corridor in the current stage. */
+        int stageFailures = 0;
     }
 
     private final Map<ObjectId, TargetAttemptState> attemptStates = new HashMap<>();
+    /** Admissible ways into the own OKS polygon per target, nearest entry first. */
+    private final Map<ObjectId, List<Approach>> approaches = new HashMap<>();
 
     public GridRoutePlanner(Dataset dataset, SearchOptions options, RulesCatalog catalog) {
         this.dataset = dataset;
@@ -377,27 +403,50 @@ public final class GridRoutePlanner {
         TargetAttemptState state = attemptStates.computeIfAbsent(target.id, k -> new TargetAttemptState());
         Coordinate goal = target.point.getCoordinate();
         int diameter = targetDiameter.get(target.id);
+        // Section 2.2: the own OKS polygon is entered only by one straight segment from its boundary
+        // nearest to the target. The grid search ends in the outward corridor of that segment and treats
+        // the own polygon as an ordinary forbidden obstacle; farther entries are tried only after the
+        // nearer ones (see findApproaches).
+        List<Approach> ways = approaches(target);
+        if (target.ownOksPolygon != null && state.approachIndex >= ways.size()) {
+            state.exhaustedAll = true;
+            return null;
+        }
+        while (target.ownOksPolygon != null && state.approachIndex < ways.size()
+                && !approachOpen(ways.get(state.approachIndex), diameter)) {
+            state.approachIndex++;
+        }
+        if (target.ownOksPolygon != null && state.approachIndex >= ways.size()) {
+            state.exhaustedAll = true;
+            return null;
+        }
+        Approach approach = target.ownOksPolygon == null ? null : ways.get(state.approachIndex);
+        List<Coordinate> searchGoals = approach == null ? Collections.singletonList(goal) : approach.corridor;
+        Coordinate after = approach == null ? null : goal;
         while (!state.exhaustedAll) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new java.util.concurrent.CancellationException("Route search interrupted");
             }
             if (state.stage == 1) {
-                TapCandidate tap = nextTap(target, state);
+                TapCandidate tap = approach != null && state.stageFailures >= MAX_APPROACH_TAP_FAILURES
+                        ? null : nextTap(target, state);
                 if (tap == null) {
+                    state.stageFailures = 0;
                     state.stage = 2;
                     state.optionIndex = 0;
                     state.tieIndex = 0;
                     state.currentOptions = null;
                     continue;
                 }
-                List<Coordinate> path = aStar(tap.point, goal, target.ownOksPolygonId, diameter,
+                List<Coordinate> path = aStar(tap.point, searchGoals, null, diameter,
                         25.0, null, tap.parentTargetId, tap.point,
-                        acceptedTraces.get(tap.parentTargetId).points.get(tap.vertexIndex - 1));
+                        acceptedTraces.get(tap.parentTargetId).points.get(tap.vertexIndex - 1), after);
                 if (path == null) {
+                    state.stageFailures++;
                     continue;
                 }
-                path = straightenOwnOksApproach(path, target);
-                if (!validOwnOksApproach(path, target)) {
+                path = withFinalApproach(path, goal, approach);
+                if (!validOwnOksApproach(path, target) || finalSegmentCrossesTraces(path, tap.parentTargetId, tap.point)) {
                     continue;
                 }
                 return new Trace(target.id, null, path, tap.rootId, tap.parentTargetId, tap.vertexIndex);
@@ -413,7 +462,25 @@ public final class GridRoutePlanner {
                 state.currentOptions = null;
                 if (state.optionIndex > maxOptionIndex) {
                     state.stage++;
+                    state.stageFailures = 0;
                     if (state.stage > 4) {
+                        int nextApproach = state.approachIndex + 1;
+                        while (approach != null && nextApproach < ways.size()
+                                && !approachOpen(ways.get(nextApproach), diameter)) {
+                            nextApproach++;
+                        }
+                        if (approach != null && nextApproach < ways.size()) {
+                            // No route reaches this entry: try the next nearest way into the building.
+                            state.approachIndex = nextApproach;
+                            state.stage = 0;
+                            state.triedTaps.clear();
+                            state.triedTies.clear();
+                            approach = ways.get(state.approachIndex);
+                            searchGoals = approach.corridor;
+                            state.optionIndex = 0;
+                            state.tieIndex = 0;
+                            continue;
+                        }
                         state.exhaustedAll = true;
                         break;
                     }
@@ -427,14 +494,18 @@ public final class GridRoutePlanner {
             // Wider radii contain the earlier choices. Retry only on a different
             // grid, and recheck capacity because other targets may have connected.
             if (newEdgeBudget(tie) < 1 || !state.triedTies.add(step + ":" + rootKey(tie))) continue;
-            List<Coordinate> path = aStar(tie.coordinate, goal, target.ownOksPolygonId, diameter,
-                    step, tie.exemptLineId, null, null, null);
+            List<Coordinate> path = aStar(tie.coordinate, searchGoals, null, diameter,
+                    step, tie.exemptLineId, null, null, null, after);
             if (path == null) {
                 // Inline advance: same-target retry loop instead of returning to next().
+                if (approach != null && ++state.stageFailures >= MAX_APPROACH_FAILURES_PER_STAGE) {
+                    state.optionIndex = state.stage == 0 ? 0 : 3;
+                    state.tieIndex = Integer.MAX_VALUE;
+                }
                 continue;
             }
-            path = straightenOwnOksApproach(path, target);
-            if (!validOwnOksApproach(path, target)) {
+            path = withFinalApproach(path, goal, approach);
+            if (!validOwnOksApproach(path, target) || finalSegmentCrossesTraces(path, null, null)) {
                 continue;
             }
             return new Trace(target.id, tie, path, rootKey(tie), null, -1);
@@ -462,7 +533,7 @@ public final class GridRoutePlanner {
                     continue;
                 }
                 Coordinate v = pts.get(i);
-                if (insideForbiddenZone(v, target.ownOksPolygonId)) {
+                if (insideForbiddenZone(v, null)) {
                     continue;
                 }
                 taps.add(new TapCandidate(v, parentTrace.targetId, i, parentTrace.rootId, key));
@@ -477,64 +548,237 @@ public final class GridRoutePlanner {
         return best;
     }
 
+    /**
+     * Defensive check of the final approach: nothing but the last segment touches the own polygon and the
+     * last segment enters it once.
+     */
     private boolean validOwnOksApproach(List<Coordinate> path, RoutingContext.Target target) {
-        if (target.ownOksPolygon == null || path.size() < 2) {
-            return true;
-        }
-        int firstInside = -1;
-        for (int i = 0; i < path.size(); i++) {
-            if (target.ownOksPolygon.covers(gf.createPoint(path.get(i)))) {
-                firstInside = i;
-                break;
-            }
-        }
-        if (firstInside < 0) {
-            return true;
-        }
-        if (firstInside == 0) {
+        Coordinate goal = target.point.getCoordinate();
+        if (path.size() < 2 || path.get(path.size() - 1).distance(goal) > COINCIDENT_M) {
             return false;
         }
-        // The first point inside the own polygon must be followed only by a
-        // straight segment to the target; no turn or re-entry is permitted.
-        // Use a tolerance proportional to grid step (approx 1% of 25m = 0.25m)
-        // to account for grid quantization.
-        Coordinate entry = path.get(firstInside);
-        Coordinate targetPoint = target.point.getCoordinate();
-        double tolerance = 0.5; // meters, allows small grid quantization deviation
-        for (int i = firstInside; i < path.size() - 1; i++) {
-            Coordinate a = path.get(i);
-            Coordinate b = path.get(i + 1);
-            double cross = (targetPoint.x - entry.x) * (b.y - a.y)
-                    - (targetPoint.y - entry.y) * (b.x - a.x);
-            if (Math.abs(cross) > tolerance) {
+        if (target.ownOksPolygon == null) {
+            return true;
+        }
+        if (path.size() > 2) {
+            Coordinate[] before = path.subList(0, path.size() - 1).toArray(new Coordinate[0]);
+            if (target.ownOksPolygon.intersects(gf.createLineString(before))) {
                 return false;
             }
         }
-        return path.get(path.size() - 1).distance(targetPoint) <= 0.001;
+        LineString last = gf.createLineString(new Coordinate[] {path.get(path.size() - 2), goal});
+        Geometry inside = target.ownOksPolygon.intersection(last);
+        if (inside.getNumGeometries() > 1) {
+            return false;
+        }
+        return true;
     }
 
-    /** Replaces the portion of the path inside own OKS polygon with a straight segment. */
-    private List<Coordinate> straightenOwnOksApproach(List<Coordinate> path, RoutingContext.Target target) {
-        if (target.ownOksPolygon == null || path.size() < 2) {
+    /** Appends the final straight segment to the target; a collinear approach start is merged into it. */
+    private List<Coordinate> withFinalApproach(List<Coordinate> path, Coordinate goal, Approach approach) {
+        if (approach == null) {
             return path;
         }
-        int firstInside = -1;
-        for (int i = 0; i < path.size(); i++) {
-            if (target.ownOksPolygon.covers(gf.createPoint(path.get(i)))) {
-                firstInside = i;
-                break;
+        List<Coordinate> result = new ArrayList<>(path);
+        result.add(goal);
+        return simplify(result);
+    }
+
+    /** One way into the own OKS polygon: boundary entry point and the outward corridor where the final segment may start. */
+    private static final class Approach {
+        final Coordinate entry;
+        final List<Coordinate> corridor;
+
+        Approach(Coordinate entry, List<Coordinate> corridor) {
+            this.entry = entry;
+            this.corridor = corridor;
+        }
+    }
+
+    private boolean finalSegmentCrossesTraces(List<Coordinate> path, ObjectId parentTargetId, Coordinate tapPoint) {
+        return path.size() >= 2 && crossesAcceptedTraces(path.get(path.size() - 2), path.get(path.size() - 1),
+                parentTargetId, tapPoint);
+    }
+
+    /**
+     * Whether the grid can still leave the approach corridor without crossing accepted traces: it reaches
+     * open ground far from the target or a vertex of an accepted trace where a branch may start.
+     */
+    private boolean approachOpen(Approach approach, int diameter) {
+        if (acceptedTraces.isEmpty()) {
+            return true;
+        }
+        List<Coordinate> taps = new ArrayList<>();
+        for (Trace trace : acceptedTraces.values()) {
+            taps.addAll(trace.points.subList(0, Math.max(0, trace.points.size() - 1)));
+        }
+        Coordinate target = approach.corridor.get(0);
+        java.util.ArrayDeque<Coordinate> queue = new java.util.ArrayDeque<>(approach.corridor);
+        Set<String> seen = new HashSet<>();
+        Envelope bounds = context.searchBounds(REACH_RADIUS_M);
+        while (!queue.isEmpty() && seen.size() < REACH_BUDGET) {
+            Coordinate current = queue.poll();
+            if (current.distance(target) >= REACH_RADIUS_M) {
+                return true;
+            }
+            for (Coordinate vertex : taps) {
+                if (current.distance(vertex) <= REACH_STEP_M * 1.5) {
+                    return true;
+                }
+            }
+            for (Coordinate next : neighbors(current, REACH_STEP_M, bounds)) {
+                Coordinate snapped = new Coordinate(Math.round(next.x / REACH_STEP_M) * REACH_STEP_M,
+                        Math.round(next.y / REACH_STEP_M) * REACH_STEP_M);
+                if (!seen.add(key(snapped, REACH_STEP_M))) {
+                    continue;
+                }
+                if (context.blockedByForbidden(current, snapped, null, Collections.emptySet())
+                        || crossesAcceptedTraces(current, snapped, null, null)) {
+                    continue;
+                }
+                queue.add(snapped);
             }
         }
-        if (firstInside <= 0 || firstInside >= path.size() - 1) {
-            return path;
+        return false;
+    }
+
+    private List<Approach> approaches(RoutingContext.Target target) {
+        if (target.ownOksPolygon == null) {
+            return Collections.emptyList();
         }
-        // Replace everything from entry point to target with a straight segment
-        List<Coordinate> result = new ArrayList<>(firstInside + 2);
-        for (int i = 0; i <= firstInside; i++) {
-            result.add(path.get(i));
+        return approaches.computeIfAbsent(target.id, id -> findApproaches(target));
+    }
+
+    /**
+     * Ways into the own polygon ordered by the length of the final segment inside it: the nearest boundary
+     * point first, then farther entries only where a nearer one is geometrically impossible (an inner
+     * courtyard, a bay whose outward ray hits the building again, another obstacle on the approach line).
+     * Only exterior rings are used: a hole is enclosed by the building and cannot be reached.
+     */
+    private List<Approach> findApproaches(RoutingContext.Target target) {
+        Geometry polygon = target.ownOksPolygon;
+        Coordinate goal = target.point.getCoordinate();
+        List<Coordinate> entries = new ArrayList<>();
+        for (int i = 0; i < polygon.getNumGeometries(); i++) {
+            Geometry part = polygon.getGeometryN(i);
+            if (!(part instanceof org.locationtech.jts.geom.Polygon)) {
+                continue;
+            }
+            LineString ring = ((org.locationtech.jts.geom.Polygon) part).getExteriorRing();
+            entries.add(DistanceOp.nearestPoints(ring, target.point)[0]);
+            Coordinate[] coords = ring.getCoordinates();
+            for (int k = 0; k + 1 < coords.length; k++) {
+                double length = coords[k].distance(coords[k + 1]);
+                int samples = Math.max(1, (int) Math.ceil(length / ENTRY_SAMPLE_M));
+                for (int j = 0; j < samples; j++) {
+                    double t = (double) j / samples;
+                    entries.add(new Coordinate(coords[k].x + t * (coords[k + 1].x - coords[k].x),
+                            coords[k].y + t * (coords[k + 1].y - coords[k].y)));
+                }
+            }
         }
-        result.add(target.point.getCoordinate());
+        entries.sort(Comparator.comparingDouble(c -> c.distance(goal)));
+        int diameter = targetDiameter.get(target.id);
+        List<Approach> result = new ArrayList<>();
+        for (Coordinate entry : entries) {
+            if (result.size() >= MAX_APPROACHES) {
+                break;
+            }
+            boolean close = false;
+            for (Approach known : result) {
+                close |= known.entry.distance(entry) < ENTRY_SEPARATION_M;
+            }
+            if (close) {
+                continue;
+            }
+            Approach approach = approachThrough(target, entry, diameter);
+            if (approach != null && reachable(approach, target, diameter)) {
+                result.add(approach);
+            }
+        }
         return result;
+    }
+
+    /**
+     * Cheap flood over the search grid from the corridor outwards: a corridor in an enclosed bay or yard
+     * would otherwise make every later A* run exhaust its whole budget.
+     */
+    private boolean reachable(Approach approach, RoutingContext.Target target, int diameter) {
+        Coordinate goal = target.point.getCoordinate();
+        java.util.ArrayDeque<Coordinate> queue = new java.util.ArrayDeque<>();
+        Set<String> seen = new HashSet<>();
+        for (Coordinate c : approach.corridor) {
+            queue.add(c);
+            seen.add(key(c, REACH_STEP_M) + ":seed");
+        }
+        Envelope bounds = context.searchBounds(REACH_RADIUS_M);
+        while (!queue.isEmpty() && seen.size() < REACH_BUDGET) {
+            Coordinate current = queue.poll();
+            if (current.distance(goal) >= REACH_RADIUS_M) {
+                return true;
+            }
+            for (Coordinate next : neighbors(current, REACH_STEP_M, bounds)) {
+                Coordinate snapped = new Coordinate(Math.round(next.x / REACH_STEP_M) * REACH_STEP_M,
+                        Math.round(next.y / REACH_STEP_M) * REACH_STEP_M);
+                if (!seen.add(key(snapped, REACH_STEP_M))) {
+                    continue;
+                }
+                if (context.blockedByForbidden(current, snapped, null, Collections.emptySet())
+                        || context.violatesSpecialClearance(current, snapped, diameter, null, Collections.emptySet())) {
+                    continue;
+                }
+                queue.add(snapped);
+            }
+        }
+        return false;
+    }
+
+    private Approach approachThrough(RoutingContext.Target target, Coordinate entry, int diameter) {
+        Geometry polygon = target.ownOksPolygon;
+        Coordinate goal = target.point.getCoordinate();
+        double length = entry.distance(goal);
+        double dx;
+        double dy;
+        if (length < 1e-9) {
+            // The target lies on the boundary: leave outwards, away from the polygon centre.
+            Point centre = polygon.getCentroid();
+            dx = goal.x - centre.getX();
+            dy = goal.y - centre.getY();
+            length = Math.hypot(dx, dy);
+            if (length < 1e-9) {
+                return null;
+            }
+        } else {
+            dx = entry.x - goal.x;
+            dy = entry.y - goal.y;
+            if (!polygon.covers(gf.createLineString(new Coordinate[] {entry, goal}))) {
+                return null; // a concave outline: the straight segment would leave the building
+            }
+        }
+        dx /= length;
+        dy /= length;
+        List<Coordinate> corridor = new ArrayList<>();
+        for (double offset = APPROACH_STEP_M; offset <= MAX_APPROACH_OFFSET_M; offset += APPROACH_STEP_M) {
+            Coordinate start = new Coordinate(entry.x + dx * offset, entry.y + dy * offset);
+            if (polygon.intersection(gf.createLineString(new Coordinate[] {entry, start})).getLength() > 1e-6) {
+                break; // the outward ray runs into the same building again
+            }
+            if (insideForbiddenZone(start, null)) {
+                if (corridor.isEmpty()) {
+                    continue;
+                }
+                break;
+            }
+            if (context.blockedByForbidden(start, goal, target.ownOksPolygonId, Collections.emptySet())
+                    || context.violatesSpecialClearance(start, goal, diameter, target.ownOksPolygonId,
+                            Collections.emptySet())) {
+                break;
+            }
+            if (corridor.isEmpty() || start.distance(corridor.get(corridor.size() - 1)) >= CORRIDOR_SPACING_M) {
+                corridor.add(start);
+            }
+        }
+        return corridor.isEmpty() ? null : new Approach(entry, corridor);
     }
 
     private String rootKey(TieOption tie) {
@@ -609,7 +853,7 @@ public final class GridRoutePlanner {
         }
         double radius = snapRadius(optionIndex);
         for (RoutingContext.LineSnap snap : context.snapsOnLines(goal, radius)) {
-            if (!insideForbiddenZone(snap.snap, target.ownOksPolygonId)) {
+            if (!insideForbiddenZone(snap.snap, null)) {
                 TieOption option = new TieOption(TieKind.NEW_CHAMBER_ON_LINE, snap.lineId, snap.snap,
                         snap.distanceM * 2.0, snap.lineId);
                 // The 10 m rule: a suitable existing chamber wins over the raw snap.
@@ -697,24 +941,30 @@ public final class GridRoutePlanner {
     }
 
     /** A* over the grid; returns coordinates from the start point to the goal, endpoints included. */
-    private List<Coordinate> aStar(Coordinate start, Coordinate goal, ObjectId exemptOksPolygonId,
+    private List<Coordinate> aStar(Coordinate start, List<Coordinate> goals, ObjectId exemptOksPolygonId,
                                    int diameterMm, double step, ObjectId exemptLineId,
-                                   ObjectId parentTargetId, Coordinate tapPoint, Coordinate initialPrevious) {
+                                   ObjectId parentTargetId, Coordinate tapPoint, Coordinate initialPrevious,
+                                   Coordinate after) {
         long began = System.nanoTime();
-        LOG.debug("A* start={} goal={} step={} branch={}", start, goal, step, parentTargetId != null);
-        List<Coordinate> result = searchGrid(start, goal, exemptOksPolygonId, diameterMm, step,
-                exemptLineId, parentTargetId, tapPoint, initialPrevious);
+        LOG.debug("A* start={} goals={} step={} branch={}", start, goals.size(), step, parentTargetId != null);
+        List<Coordinate> result = searchGrid(start, goals, exemptOksPolygonId, diameterMm, step,
+                exemptLineId, parentTargetId, tapPoint, initialPrevious, after);
         LOG.debug("A* vertices={} elapsedMs={}", result == null ? 0 : result.size(), (System.nanoTime() - began) / 1_000_000);
         return result;
     }
 
-    private List<Coordinate> searchGrid(Coordinate start, Coordinate goal, ObjectId exemptOksPolygonId,
+    /**
+     * Grid A* to any of the goals (a single target, or the points of an approach corridor).
+     * {@code after}, when set, is the next vertex after the reached goal: the turn there must not exceed 90 degrees.
+     */
+    private List<Coordinate> searchGrid(Coordinate start, List<Coordinate> goals, ObjectId exemptOksPolygonId,
                                    int diameterMm, double step, ObjectId exemptLineId,
-                                   ObjectId parentTargetId, Coordinate tapPoint, Coordinate initialPrevious) {
+                                   ObjectId parentTargetId, Coordinate tapPoint, Coordinate initialPrevious,
+                                   Coordinate after) {
         // Search bounds: envelope of start/goal/chambers/lines, padded to allow routing around
         // large restrictions (rivers, parks). Use 3x straight-line distance (capped) instead of 10x
         // to avoid excessively large search areas that cause timeouts.
-        double straightDist = start.distance(goal);
+        double straightDist = distanceToGoals(start, goals);
         double padM = Math.max(500.0, Math.min(5000.0, straightDist * 3.0));
         Envelope bounds = context.searchBounds(padM);
         Map<String, Double> gScore = new HashMap<>();
@@ -730,7 +980,7 @@ public final class GridRoutePlanner {
                 .comparingDouble((OpenEntry entry) -> entry.estimate)
                 .thenComparingLong(entry -> entry.sequence));
         long sequence = 0;
-        open.add(new OpenEntry(startKey, 0.0, start.distance(goal), sequence++));
+        open.add(new OpenEntry(startKey, 0.0, straightDist, sequence++));
 
         int expansions = 0;
         // Scale expansion limit by inverse step: finer grid has more nodes per meter.
@@ -738,6 +988,9 @@ public final class GridRoutePlanner {
         // but not excessively more. Base limit applies at 25 m step for 1 km distance.
         double distanceFactor = Math.max(0.5, Math.min(5.0, straightDist / 1000.0));
         int maxExpansions = (int) (BASE_MAX_EXPANSIONS * (25.0 / step) * distanceFactor);
+        if (parentTargetId != null) {
+            maxExpansions = Math.min(maxExpansions, TAP_MAX_EXPANSIONS);
+        }
         while (!open.isEmpty()) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new java.util.concurrent.CancellationException("Route search interrupted");
@@ -752,10 +1005,14 @@ public final class GridRoutePlanner {
             // context outside cameFrom so reconstruction still starts at the tap.
             Coordinate previous = cameFrom.containsKey(currentKey)
                     ? coords.get(cameFrom.get(currentKey)) : initialPrevious;
-            if (current.distance(goal) <= step * 1.5
-                    && moveAllowed(current, goal, previous, exemptOksPolygonId, diameterMm,
-                            exemptLineId, parentTargetId, tapPoint)) {
-                return simplify(reconstruct(cameFrom, currentKey, coords, goal));
+            for (Coordinate goal : goals) {
+                if (current.distance(goal) <= step * 1.5
+                        && (after == null || (goal.x - current.x) * (after.x - goal.x)
+                                + (goal.y - current.y) * (after.y - goal.y) >= -1e-9)
+                        && moveAllowed(current, goal, previous, exemptOksPolygonId, diameterMm,
+                                exemptLineId, parentTargetId, tapPoint)) {
+                    return simplify(reconstruct(cameFrom, currentKey, coords, goal));
+                }
             }
             if (++expansions > maxExpansions) {
                 return null;
@@ -778,10 +1035,18 @@ public final class GridRoutePlanner {
                 gScore.put(neighborKey, tentative);
                 coords.put(neighborKey, neighbor);
                 cameFrom.put(neighborKey, currentKey);
-                open.add(new OpenEntry(neighborKey, tentative, tentative + neighbor.distance(goal), sequence++));
+                open.add(new OpenEntry(neighborKey, tentative, tentative + distanceToGoals(neighbor, goals), sequence++));
             }
         }
         return null;
+    }
+
+    private static double distanceToGoals(Coordinate c, List<Coordinate> goals) {
+        double best = Double.POSITIVE_INFINITY;
+        for (Coordinate goal : goals) {
+            best = Math.min(best, c.distance(goal));
+        }
+        return best;
     }
 
     private static final class OpenEntry {
