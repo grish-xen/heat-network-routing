@@ -36,6 +36,7 @@
 | `test-data/api/` | Ответы для разработки frontend на заглушках |
 | `test-data/competition-corrected.geojson` | Актуальный конкурсный набор |
 | `docs/reference/` | Оригиналы документов и текст новых DOCX для чтения человеком и ИИ |
+| `scripts/audit_result.py` | Независимая проверка готового GeoJSON по правилам приложения ([подход к ОКС](docs/OWN_OKS_APPROACH.md)) |
 | `.github/workflows/verify.yml` | Проверки после push и в Pull Request |
 
 Первичны [актуальное приложение](docs/reference/current-technical-appendix.md) и [разъяснения](docs/reference/clarifications.md); соответствующие DOCX — оригиналы. Старый PDF сохранён для общего ТЗ. При противоречии правил расчёта применяется новое приложение.

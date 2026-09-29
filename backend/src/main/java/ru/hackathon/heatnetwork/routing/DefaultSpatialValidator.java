@@ -520,56 +520,40 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         return along < extension - TOL || length - along < extension - TOL;
     }
 
-    /** Crossing the own OKS polygon is allowed only by one final straight approach to the target. */
+    /**
+     * Section 2.2 and clarification 3: the own OKS polygon may be entered only by one final straight
+     * segment from its boundary to the target point. The clearance to the own polygon is waived for that
+     * segment, including its part in the clearance zone; the rest of the edge keeps the normal clearance
+     * and never touches the polygon, and the final segment enters the polygon only once.
+     */
     private void checkOwnOksApproach(CalculatedEdge edge, Restriction restriction, Node targetNode,
                                      List<Diagnostic> diagnostics) {
-        Coordinate target = targetNode.geometry.getCoordinate();
+        Geometry polygon = restriction.geometry;
         Coordinate[] coords = edge.geometry.getCoordinates();
-        // Find the last intersection of the edge with the polygon boundary; everything
-        // after it must be a single straight segment ending at the target.
-        int lastCrossIndex = -1;
-        for (int i = 0; i + 1 < coords.length; i++) {
-            LineString seg = gf.createLineString(new Coordinate[] {coords[i], coords[i + 1]});
-            if (restriction.geometry.intersects(seg)) {
-                lastCrossIndex = i;
+        int n = coords.length;
+        if (n > 2) {
+            LineString before = gf.createLineString(java.util.Arrays.copyOfRange(coords, 0, n - 1));
+            if (polygon.intersects(before)) {
+                diagnostics.add(diag(restriction.id, "CLEARANCE_VIOLATION", "Edge " + edge.id
+                        + " enters the own OKS polygon before its final straight approach"));
+                return;
             }
-        }
-        // Segments after the last crossing must be collinear continuation to the target.
-        for (int i = lastCrossIndex + 1; i + 1 < coords.length; i++) {
-            LineString seg = gf.createLineString(new Coordinate[] {coords[i], coords[i + 1]});
-            if (restriction.geometry.intersects(seg)) {
-                diagnostics.add(diag(null, "CLEARANCE_VIOLATION",
-                        "Edge " + edge.id + " re-enters the own OKS polygon"));
+            double need = catalog.clearanceFor(restriction.type, edge.diameterMm) + catalog.halfWidthM(edge.diameterMm);
+            if (polygon.distance(before) < need - TOL) {
+                diagnostics.add(diag(restriction.id, "CLEARANCE_VIOLATION", "Edge " + edge.id
+                        + " violates clearance to the own OKS polygon before its final straight approach"));
                 return;
             }
         }
-        if (lastCrossIndex >= 0) {
-            // The approach from the boundary to the target must be one straight segment.
-            Coordinate entry = coords[lastCrossIndex + 1];
-            // If the vertex right after the boundary is not on the straight line to the target -> violation.
-            double cross = 0.0;
-            if (lastCrossIndex + 2 < coords.length) {
-                Coordinate a = coords[lastCrossIndex + 1];
-                Coordinate b = coords[lastCrossIndex + 2];
-                double d1x = target.x - a.x, d1y = target.y - a.y;
-                double d2x = b.x - a.x, d2y = b.y - a.y;
-                cross = Math.abs(d1x * d2y - d1y * d2x);
-            }
-            if (cross > 1e-6) {
-                diagnostics.add(diag(null, "CLEARANCE_VIOLATION",
-                        "Edge " + edge.id + " approaches the own OKS target non-straight"));
-            }
+        LineString last = gf.createLineString(new Coordinate[] {coords[n - 2], coords[n - 1]});
+        Geometry inside = polygon.intersection(last);
+        if (inside.getNumGeometries() > 1) {
+            diagnostics.add(diag(restriction.id, "CLEARANCE_VIOLATION", "Edge " + edge.id
+                    + " leaves and re-enters the own OKS polygon on its final approach"));
+            return;
         }
-        // The edge must not end anywhere except the target while inside the polygon.
-        for (int i = 0; i + 1 < coords.length; i++) {
-            LineString seg = gf.createLineString(new Coordinate[] {coords[i], coords[i + 1]});
-            if (restriction.geometry.contains(seg)
-                    && coords[i].distance(target) > TOL && coords[i + 1].distance(target) > TOL) {
-                diagnostics.add(diag(null, "CLEARANCE_VIOLATION",
-                        "Edge " + edge.id + " runs inside the own OKS polygon away from the target"));
-                return;
-            }
-        }
+        // The planner tries the nearest boundary first and uses a farther entry only where the nearest one
+        // cannot be reached (docs/CALCULATION_MODULE.md); the structural rule above is what is enforced here.
     }
 
     private void checkForbiddenClearance(CalculatedEdge edge, Restriction restriction,
