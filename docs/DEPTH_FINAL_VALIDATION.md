@@ -20,7 +20,7 @@
 
 ## Повторение
 
-Полный совместный `mvn verify` на Java 11: 323 теста, без ошибок и пропусков. `python scripts/check_repository.py` прошёл. Исходники Java после синхронизации с main совпадают с проверенной совместной сборкой.
+Полный совместный `mvn verify` на Java 11 после исправления калькулятора: 335 тестов, без ошибок и пропусков (в PR #29 было 323). `python scripts/check_repository.py` прошёл. Ветка `fix/calculation-polygon-entry` включает PR #29 и проверяет оба модуля вместе.
 
 ```sh
 mvn -f backend/pom.xml verify
