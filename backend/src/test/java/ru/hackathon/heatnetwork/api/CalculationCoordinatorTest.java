@@ -24,7 +24,7 @@ class CalculationCoordinatorTest {
         AtomicInteger index = new AtomicInteger();
         RoutePlanner.SearchSession session = session(candidates.size());
         CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session,
-                (d, c, m) -> accepted(c.candidateId, candidates.get(index.getAndIncrement())), new JobProperties());
+                (d, c, m) -> accepted(c.candidateId, candidates.get(index.getAndIncrement())), oneStrategy());
         List<CalculatedVariant> selected = coordinator.calculate(dataset, stage -> { });
         assertEquals(List.of(new BigDecimal("2"), new BigDecimal("4"), new BigDecimal("6")),
                 List.of(selected.get(0).summary.score, selected.get(1).summary.score, selected.get(2).summary.score));
@@ -43,7 +43,7 @@ class CalculationCoordinatorTest {
         AtomicInteger index = new AtomicInteger();
         RoutePlanner.SearchSession session = session(3);
         List<CalculatedVariant> selected = new CalculationCoordinator((d, o) -> session,
-                (d, c, m) -> accepted(c.candidateId, candidates.get(index.getAndIncrement())), new JobProperties())
+                (d, c, m) -> accepted(c.candidateId, candidates.get(index.getAndIncrement())), oneStrategy())
                 .calculate(dataset, stage -> { });
         assertEquals(1, selected.size());
         assertTrue(selected.get(0).unconnectedPointIds.isEmpty());
@@ -52,7 +52,7 @@ class CalculationCoordinatorTest {
 
     @Test void rejectionFeedsBackAndSearchRespectsItsBudget() throws Exception {
         RoutePlanner.SearchSession session = session(100);
-        JobProperties properties = new JobProperties();
+        JobProperties properties = oneStrategy();
         properties.setMaxCandidates(2);
         CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session,
                 (d, c, m) -> { Evaluation e = new Evaluation(); e.candidateId = c.candidateId; return e; }, properties);
@@ -67,7 +67,7 @@ class CalculationCoordinatorTest {
     @Test void internalFailureClosesSessionAndDoesNotBecomeAnUnconnectedSuccess() {
         RoutePlanner.SearchSession session = session(1);
         CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session,
-                (d, c, m) -> { throw new IllegalStateException("broken calculation"); }, new JobProperties());
+                (d, c, m) -> { throw new IllegalStateException("broken calculation"); }, oneStrategy());
         assertThrows(IllegalStateException.class, () -> coordinator.calculate(dataset, stage -> { }));
         verify(session).close();
         verify(session, never()).feedback(any());
@@ -76,7 +76,7 @@ class CalculationCoordinatorTest {
     @Test void interruptedSearchClosesSessionBeforeExport() {
         RoutePlanner.SearchSession session = session(1);
         CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session,
-                (d, c, m) -> { Thread.currentThread().interrupt(); return accepted(c.candidateId, variant("v", 1, 1)); }, new JobProperties());
+                (d, c, m) -> { Thread.currentThread().interrupt(); return accepted(c.candidateId, variant("v", 1, 1)); }, oneStrategy());
         try { assertThrows(java.io.InterruptedIOException.class, () -> coordinator.calculate(dataset, stage -> { })); }
         finally { Thread.interrupted(); }
         verify(session).close();
@@ -98,7 +98,7 @@ class CalculationCoordinatorTest {
         }, (d, c, mode) -> {
             assertEquals(Mode.DEPTH, mode);
             return accepted(c.candidateId, candidates.get(index.getAndIncrement()));
-        }, new JobProperties());
+        }, oneStrategy());
 
         List<CalculatedVariant> selected = coordinator.calculate(dataset, Mode.DEPTH, stage -> { });
 
@@ -170,7 +170,7 @@ class CalculationCoordinatorTest {
                 RoutePlanner.SearchSession session = session(1);
                 CalculatedVariant wrong = profile("wrong", returned, 3.0, 1);
                 CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session,
-                        (d, c, m) -> accepted(c.candidateId, wrong), new JobProperties());
+                        (d, c, m) -> accepted(c.candidateId, wrong), oneStrategy());
                 assertThrows(IllegalStateException.class,
                         () -> coordinator.calculate(dataset, requested, stage -> { }));
                 verify(session).close();
@@ -186,7 +186,7 @@ class CalculationCoordinatorTest {
         }, (d, c, mode) -> {
             assertEquals(Mode.TWO_D, mode);
             return accepted(c.candidateId, profile("v", mode, 3.0, 1));
-        }, new JobProperties());
+        }, oneStrategy());
         CalculatedVariant selected = coordinator.calculate(dataset, stage -> { }).get(0);
         assertEquals(Mode.TWO_D, selected.mode);
         for (CalculatedEdge edge : selected.edges) {
@@ -197,7 +197,7 @@ class CalculationCoordinatorTest {
 
     @Test void searchDiagnosticsSurviveRejectedCandidatesAndBudgetLimitWithAResult() throws Exception {
         RoutePlanner.SearchSession session = session(3);
-        JobProperties properties = new JobProperties();
+        JobProperties properties = oneStrategy();
         properties.setMaxCandidates(2);
         AtomicInteger calls = new AtomicInteger();
         List<ApiError> diagnostics = new ArrayList<>();
@@ -218,7 +218,7 @@ class CalculationCoordinatorTest {
         when(session.next()).thenReturn(Optional.of(candidate), Optional.empty());
         List<ApiError> diagnostics = new ArrayList<>();
         CalculationCoordinator coordinator = new CalculationCoordinator((d, o) -> session,
-                (d, c, mode) -> accepted(c.candidateId, profile("ok", mode, 3, 1)), new JobProperties());
+                (d, c, mode) -> accepted(c.candidateId, profile("ok", mode, 3, 1)), oneStrategy());
         coordinator.calculate(dataset, Mode.DEPTH, stage -> { }, diagnostics);
         assertEquals(1, diagnostics.size());
         assertEquals("internal limit", diagnostics.get(0).message);
@@ -226,9 +226,69 @@ class CalculationCoordinatorTest {
         RoutePlanner.SearchSession ordinary = session(1);
         diagnostics.clear();
         new CalculationCoordinator((d, o) -> ordinary,
-                (d, c, mode) -> accepted(c.candidateId, profile("ok", mode, 3, 1)), new JobProperties())
+                (d, c, mode) -> accepted(c.candidateId, profile("ok", mode, 3, 1)), oneStrategy())
                 .calculate(dataset, Mode.DEPTH, stage -> { }, diagnostics);
         assertTrue(diagnostics.isEmpty());
+    }
+
+    @Test void everyStrategyIsSearchedAndTheirBestDistinctVariantsAreRankedTogether() throws Exception {
+        // The planner receives seed, seed + 1, seed + 2; each session yields one complete scheme.
+        List<Long> seeds = Collections.synchronizedList(new ArrayList<>());
+        Map<String, CalculatedVariant> byCandidate = Map.of(
+                "s7", variant("joint", 1, 5), "s8", variant("line-ties", 2, 9), "s9", variant("near-first", 3, 7));
+        JobProperties properties = new JobProperties();
+        properties.setSearchSeed(7);
+        List<ApiError> reported = new ArrayList<>();
+        List<CalculatedVariant> selected = new CalculationCoordinator((d, options) -> {
+            seeds.add(options.seed);
+            RouteCandidate candidate = new RouteCandidate();
+            candidate.candidateId = "s" + options.seed;
+            if (options.seed != 7L) {
+                // An alternative strategy that reports a budget stop must not mark the main result.
+                Diagnostic stop = new Diagnostic();
+                stop.code = "SEARCH_BUDGET_EXHAUSTED";
+                stop.message = "alternative";
+                candidate.diagnostics.add(stop);
+            }
+            RoutePlanner.SearchSession session = mock(RoutePlanner.SearchSession.class);
+            when(session.next()).thenReturn(Optional.of(candidate), Optional.empty());
+            return session;
+        }, (d, c, m) -> accepted(c.candidateId, byCandidate.get(c.candidateId)), properties)
+                .calculate(dataset, Mode.TWO_D, stage -> { }, reported);
+        assertEquals(Set.of(7L, 8L, 9L), new HashSet<>(seeds));
+        assertEquals(List.of(new BigDecimal("5"), new BigDecimal("7"), new BigDecimal("9")),
+                List.of(selected.get(0).summary.score, selected.get(1).summary.score, selected.get(2).summary.score));
+        assertEquals(List.of("variant-1", "variant-2", "variant-3"),
+                List.of(selected.get(0).variantId, selected.get(1).variantId, selected.get(2).variantId));
+        assertTrue(reported.isEmpty(), "only the main strategy reports search diagnostics: " + reported.size());
+    }
+
+    @Test void aSlowAlternativeIsInterruptedAndTheMainResultStands() throws Exception {
+        JobProperties properties = new JobProperties();
+        properties.setVariantStrategies(2);
+        properties.setAlternativeTimeout(java.time.Duration.ofMillis(300));
+        java.util.concurrent.CountDownLatch stopped = new java.util.concurrent.CountDownLatch(1);
+        long started = System.nanoTime();
+        List<CalculatedVariant> selected = new CalculationCoordinator((d, options) -> {
+            if (options.seed == 0L) return session(1);
+            RoutePlanner.SearchSession slow = mock(RoutePlanner.SearchSession.class);
+            when(slow.next()).thenAnswer(call -> {
+                try { Thread.sleep(60_000); } catch (InterruptedException interrupted) { stopped.countDown(); }
+                throw new java.util.concurrent.CancellationException("Route search interrupted");
+            });
+            return slow;
+        }, (d, c, m) -> accepted(c.candidateId, variant("main", 1, 3)), properties)
+                .calculate(dataset, Mode.TWO_D, stage -> { }, new ArrayList<>());
+        assertEquals(1, selected.size());
+        assertEquals(new BigDecimal("3"), selected.get(0).summary.score);
+        assertTrue(System.nanoTime() - started < java.util.concurrent.TimeUnit.SECONDS.toNanos(10));
+        assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS), "the alternative search is interrupted");
+    }
+
+    private static JobProperties oneStrategy() {
+        JobProperties properties = new JobProperties();
+        properties.setVariantStrategies(1);
+        return properties;
     }
 
     private RoutePlanner.SearchSession session(int count) {

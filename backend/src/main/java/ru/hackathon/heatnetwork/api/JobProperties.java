@@ -18,6 +18,10 @@ public class JobProperties {
     @NotNull private Duration retention = Duration.ofHours(24);
     @Min(1) @Max(10000) private int maxCandidates = 100;
     private long searchSeed = 0;
+    /** Planner strategies run per job (seed, seed + 1, ...); up to three best distinct variants are kept. */
+    @Min(1) @Max(3) private int variantStrategies = 3;
+    /** Shared wall-clock budget of the alternative strategies, which run in parallel after the main one. */
+    @NotNull private Duration alternativeTimeout = Duration.ofSeconds(60);
 
     public Path getStorageDirectory() { return storageDirectory; }
     public void setStorageDirectory(Path value) { storageDirectory = value; }
@@ -33,4 +37,8 @@ public class JobProperties {
     public void setMaxCandidates(int value) { maxCandidates = value; }
     public long getSearchSeed() { return searchSeed; }
     public void setSearchSeed(long value) { searchSeed = value; }
+    public int getVariantStrategies() { return variantStrategies; }
+    public void setVariantStrategies(int value) { variantStrategies = value; }
+    public Duration getAlternativeTimeout() { return alternativeTimeout; }
+    public void setAlternativeTimeout(Duration value) { alternativeTimeout = value; }
 }

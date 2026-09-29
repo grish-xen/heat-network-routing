@@ -59,8 +59,14 @@ class JobApiTest {
         ResponseEntity<JsonNode> variants = http.getForEntity(location + "/variants", JsonNode.class);
         assertEquals(200, variants.getStatusCodeValue());
         assertEquals("no-store", variants.getHeaders().getCacheControl());
-        assertEquals(1, variants.getBody().size(), "complete candidate replaces intermediate partial result");
-        assertEquals(0, variants.getBody().get(0).path("unconnected_oks_ids").size());
+        // Complete schemes of the planner strategies replace intermediate partial results.
+        assertTrue(variants.getBody().size() >= 1 && variants.getBody().size() <= 3, variants.getBody().toString());
+        java.util.Set<String> distinct = new java.util.HashSet<>();
+        for (JsonNode summary : variants.getBody()) {
+            assertEquals(0, summary.path("unconnected_oks_ids").size(), "no partial variant: " + summary);
+            distinct.add(summary.path("new_network_length").asText() + "/" + summary.path("calculated_cost").asText());
+        }
+        assertEquals(variants.getBody().size(), distinct.size(), "variants differ in length or cost");
         String rawVariants = http.getForObject(location + "/variants", String.class);
         assertFalse(rawVariants.matches("(?s).*\\d[eE][+-]?\\d.*"), "no exponent notation in costs: " + rawVariants);
         ResponseEntity<byte[]> download = http.getForEntity(location + "/result", byte[].class);
@@ -91,7 +97,11 @@ class JobApiTest {
         assertEquals(expectedInput, inputFeatures);
         java.util.List<JsonNode> resultFeatures = mapPages(location + "/map?layer=result&variantId=" + variantId + "&bbox=-180,-90,180,90&limit=1");
         java.util.List<JsonNode> expectedResult = new java.util.ArrayList<>();
-        collection.path("features").forEach(feature -> { if (!feature.path("geometry").isNull()) expectedResult.add(feature); });
+        collection.path("features").forEach(feature -> {
+            if (!feature.path("geometry").isNull() && variantId.equals(feature.at("/properties/variant_id").asText())) {
+                expectedResult.add(feature);
+            }
+        });
         assertEquals(expectedResult, resultFeatures);
         ResponseEntity<JsonNode> bounds = http.getForEntity(location + "/map/bounds?variantId=" + variantId, JsonNode.class);
         assertEquals(200, bounds.getStatusCodeValue());

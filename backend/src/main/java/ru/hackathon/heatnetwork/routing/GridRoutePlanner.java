@@ -87,6 +87,23 @@ public final class GridRoutePlanner {
     private final RoutingContext context;
     private final Mode mode;
     private final int maxCandidates;
+    private final Strategy strategy;
+
+    /**
+     * Search strategy selected by {@code SearchOptions.seed} (modulo the number of strategies). Each one
+     * yields a substantively different scheme for the variant list (section 6 of the appendix):
+     * JOINT connects consumers into shared trees, largest flow first; LINE_TIES connects at the nearest
+     * points of existing lines rather than at farther existing chambers (the 10 m rule still turns a
+     * nearby point into that chamber); NEAR_FIRST grows the network outwards, connecting the consumers
+     * nearest to the existing network first, so other consumers branch from different trunks.
+     */
+    enum Strategy {
+        JOINT, LINE_TIES, NEAR_FIRST;
+
+        static Strategy of(long seed) {
+            return values()[(int) Math.floorMod(seed, (long) values().length)];
+        }
+    }
     private final List<ObjectId> orderedTargets;
     private final Map<ObjectId, Integer> targetOrderIndex = new HashMap<>();
 
@@ -199,6 +216,7 @@ public final class GridRoutePlanner {
         this.mode = options.mode;
         if (mode == null) throw new IllegalArgumentException("Search mode is required");
         this.maxCandidates = Math.max(1, options.maxCandidates);
+        this.strategy = Strategy.of(options.seed);
 
         List<InputObject> objects = new ArrayList<>();
         for (InputType type : InputType.values()) {
@@ -216,7 +234,24 @@ public final class GridRoutePlanner {
             ids.add(target.id);
         }
         // Deterministic: larger flow first — main corridors are laid by the bigger branches.
+        // NEAR_FIRST: nearest to the existing network first (larger flow breaks ties).
+        Map<ObjectId, Double> networkDistance = new HashMap<>();
+        if (strategy == Strategy.NEAR_FIRST) {
+            for (RoutingContext.Target target : context.targets()) {
+                double nearest = Double.POSITIVE_INFINITY;
+                for (RoutingContext.HeatLine line : context.existingLines()) {
+                    nearest = Math.min(nearest, line.line.distance(target.point));
+                }
+                networkDistance.put(target.id, nearest);
+            }
+        }
         ids.sort((a, b) -> {
+            if (strategy == Strategy.NEAR_FIRST) {
+                int byDistance = Double.compare(networkDistance.get(a), networkDistance.get(b));
+                if (byDistance != 0) {
+                    return byDistance;
+                }
+            }
             RoutingContext.Target ta = target(a);
             RoutingContext.Target tb = target(b);
             return Double.compare(tb.flowTph, ta.flowTph);
@@ -846,6 +881,9 @@ public final class GridRoutePlanner {
         Coordinate goal = target.point.getCoordinate();
 
         for (RoutingContext.Chamber chamber : context.existingChambers()) {
+            if (strategy == Strategy.LINE_TIES) {
+                break; // chambers enter only through the 10 m rule below
+            }
             Coordinate cc = chamber.point.getCoordinate();
             ObjectId exemptLineId = findHeatNetworkLineForChamber(cc);
             TieOption option = new TieOption(TieKind.EXISTING_CHAMBER, chamber.id, cc, cc.distance(goal), exemptLineId);
