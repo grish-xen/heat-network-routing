@@ -17,6 +17,18 @@ function abortIfNeeded(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException('Запрос карты отменён', 'AbortError')
 }
 
+function featurePartCount(feature: MapPage['features'][number]): number {
+  const { geometry } = feature
+  const lineParts = (points: readonly unknown[]) => Math.max(1, points.length - 1)
+  switch (geometry.type) {
+    case 'LineString': return lineParts(geometry.coordinates)
+    case 'MultiLineString': return geometry.coordinates.reduce((sum, line) => sum + lineParts(line), 0)
+    case 'Polygon': return geometry.coordinates.reduce((sum, ring) => sum + lineParts(ring), 0)
+    case 'MultiPolygon': return geometry.coordinates.reduce((sum, polygon) => sum + polygon.reduce((ringSum, ring) => ringSum + lineParts(ring), 0), 0)
+    default: return 1
+  }
+}
+
 export async function loadMapFeatures(
   api: HeatNetworkApi,
   jobId: string,
@@ -34,16 +46,19 @@ export async function loadMapFeatures(
     throw new Error('Предел объектов карты должен быть положительным целым числом')
   }
   const features: MapPage['features'][number][] = []
+  let featureParts = 0
   const seenCursors = new Set<string>()
   let cursor: string | undefined
   do {
     abortIfNeeded(signal)
     const page = await api.getMapPage(jobId, { ...query, cursor }, signal)
     abortIfNeeded(signal)
-    if (maxFeatures !== undefined && features.length + page.features.length > maxFeatures) {
+    const pageParts = page.features.reduce((sum, feature) => sum + featurePartCount(feature), 0)
+    if (maxFeatures !== undefined && featureParts + pageParts > maxFeatures) {
       throw new Error(`Превышен предел объектов для глубинной сцены: ${maxFeatures}`)
     }
     features.push(...page.features)
+    featureParts += pageParts
     cursor = page.nextCursor ?? undefined
     if (cursor) {
       if (seenCursors.has(cursor)) throw new Error('Сервер вернул цикл курсоров карты')
