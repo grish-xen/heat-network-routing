@@ -1,0 +1,76 @@
+name: DEPTH browser acceptance
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'scripts/check_depth*browser.mjs'
+      - '.github/workflows/browser.yml'
+jobs:
+  browser:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: mvn --batch-mode --no-transfer-progress -f backend/pom.xml verify
+      - run: npm --prefix frontend ci
+      - name: Install isolated browser tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser-tools" playwright-core@1.63.0
+          node "$RUNNER_TEMP/browser-tools/node_modules/playwright-core/cli.js" install --with-deps chromium
+      - name: Run strict HTTP and D4 browser scenarios
+        shell: bash
+        env:
+          VITE_API_MODE: http
+          BROWSER_FAIL_ON_FINDINGS: '1'
+        run: |
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright-core/index.mjs"
+          export BROWSER_EXECUTABLE="$(node --input-type=module -e 'const {chromium} = await import(process.env.PLAYWRIGHT_MODULE); console.log(chromium.executablePath())')"
+          export SOURCE_COMMIT="$(git rev-parse HEAD)"
+          export BROWSER_OUTPUT="$RUNNER_TEMP/browser-report"
+          mkdir -p "$BROWSER_OUTPUT"
+          java -Xmx512m -jar backend/target/heat-network-routing-0.1.0-SNAPSHOT.jar \
+            --server.address=127.0.0.1 --server.port=8080 \
+            --heat-network.jobs.storage-directory="$RUNNER_TEMP/browser-jobs" \
+            --heat-network.input.storage-directory="$RUNNER_TEMP/browser-datasets" \
+            > "$BROWSER_OUTPUT/backend.log" 2>&1 &
+          backend_pid=$!
+          (cd frontend && exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5174 --strictPort) \
+            > "$BROWSER_OUTPUT/frontend.log" 2>&1 &
+          frontend_pid=$!
+          trap 'kill "$backend_pid" "$frontend_pid" 2>/dev/null || true' EXIT
+          for url in http://127.0.0.1:8080/api/health http://127.0.0.1:5174; do
+            ready=false
+            for attempt in {1..60}; do
+              if curl --silent --fail --max-time 1 "$url" > /dev/null; then ready=true; break; fi
+              if ! kill -0 "$backend_pid" || ! kill -0 "$frontend_pid"; then break; fi
+              sleep 1
+            done
+            if [ "$ready" != true ]; then echo "Readiness timeout: $url"; exit 1; fi
+          done
+          baseline=0
+          advanced=0
+          timeout 600 node scripts/check_depth_browser.mjs > "$BROWSER_OUTPUT/baseline.log" 2>&1 || baseline=$?
+          timeout 240 node scripts/check_depth_d4_browser.mjs > "$BROWSER_OUTPUT/advanced.log" 2>&1 || advanced=$?
+          echo "BASELINE_EXIT=$baseline ADVANCED_EXIT=$advanced"
+          test "$baseline" -eq 0 && test "$advanced" -eq 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: depth-browser-report
+          path: ${{ runner.temp }}/browser-report
+          if-no-files-found: warn
+          retention-days: 7
