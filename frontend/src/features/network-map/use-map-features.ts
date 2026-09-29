@@ -10,6 +10,7 @@ export const MAX_DEPTH_SCENE_FEATURES = 2_000
 
 interface MapFeatureCollectionOptions {
   readonly maxFeatures?: number
+  readonly keepPreviousData?: boolean
 }
 
 function abortIfNeeded(signal: AbortSignal): void {
@@ -83,7 +84,9 @@ export function useMapFeatureCollections(
     queries: queries.map((query) => ({
       queryKey: mapQueryKey(jobId, query),
       queryFn: ({ signal }: { signal: AbortSignal }) => loadMapFeatures(api, jobId, query, signal, options.maxFeatures),
-      placeholderData: (previous: MapPage | undefined) => previous,
+      ...(options.keepPreviousData === false
+        ? {}
+        : { placeholderData: (previous: MapPage | undefined) => previous }),
       enabled,
     })),
   })

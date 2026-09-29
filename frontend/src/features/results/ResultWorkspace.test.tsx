@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -35,8 +35,13 @@ function api(): HeatNetworkApi {
   }
 }
 
-function renderWorkspace(mode: '2d' | 'depth' = '2d', suppliedApi = api()) {
+function renderWorkspace(
+  mode: '2d' | 'depth' = '2d',
+  suppliedApi = api(),
+  prepareClient?: (client: QueryClient) => void,
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  prepareClient?.(client)
   render(<QueryClientProvider client={client}><ResultWorkspace api={suppliedApi} jobId="job-1" mode={mode} /></QueryClientProvider>)
 }
 
@@ -102,6 +107,40 @@ describe('ResultWorkspace', () => {
 
     expect(await screen.findByRole('option', { name: 'строковый «1»' })).toHaveValue('string:1')
     expect(screen.getByRole('option', { name: 'числовой 1' })).toHaveValue('number:1')
+  })
+
+  it('clears an old path and shows loading while the newly selected variant is still loading', async () => {
+    let resolveNewVariant: ((page: { type: 'FeatureCollection'; features: MapFeature[]; nextCursor: null }) => void) | undefined
+    const depthApi = apiForDepthMap(vi.fn((_jobId, mapQuery) => {
+      if (mapQuery.variantId?.value === 'v2') {
+        return new Promise((resolve) => { resolveNewVariant = resolve })
+      }
+      return Promise.resolve({ type: 'FeatureCollection', features: [
+        depthEdge({ kind: 'string', value: 'старый потребитель' }),
+        depthEdge({ kind: 'string', value: 'старый резервный потребитель' }),
+      ], nextCursor: null })
+    }))
+    const user = userEvent.setup()
+
+    renderWorkspace('depth', depthApi, (client) => {
+      client.setQueryData(['map-bounds', 'job-1', 'string:v2'], [37.4, 55.6, 37.42, 55.62])
+    })
+
+    expect(await screen.findByRole('option', { name: 'строковый «старый потребитель»' })).toBeVisible()
+    await user.selectOptions(screen.getByRole('combobox', { name: /конечный потребитель/i }), 'string:старый резервный потребитель')
+    await user.click(screen.getByRole('radio', { name: /вариант 2/i }))
+
+    expect(await screen.findByText(/загружаем профиль и 3d/i)).toBeVisible()
+    expect(screen.queryByRole('option', { name: 'строковый «старый потребитель»' })).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveNewVariant?.({ type: 'FeatureCollection', features: [
+        depthEdge({ kind: 'string', value: 'новый потребитель' }),
+        depthEdge({ kind: 'string', value: 'старый резервный потребитель' }),
+      ], nextCursor: null })
+    })
+    expect(await screen.findByRole('option', { name: 'строковый «новый потребитель»' })).toBeVisible()
+    expect(screen.getByRole('combobox', { name: /конечный потребитель/i })).toHaveValue('string:новый потребитель')
   })
 
   it('keeps export available while depth geometry is loading', async () => {

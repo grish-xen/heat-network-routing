@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
 import { ApiClientError } from '../../shared/api/api-error'
@@ -33,10 +33,15 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
   const [endpointKey, setEndpointKey] = useState<string | null>(null)
   const ranked = [...(variants.data ?? [])].sort((left, right) => left.rank - right.rank)
   const selected = ranked.find((variant) => objectIdKey(variant.variantId) === selectedKey) ?? ranked[0]
+  const selectedVariantKey = selected ? objectIdKey(selected.variantId) : null
+  useEffect(() => {
+    setEndpointKey(null)
+    setMapUnavailable(false)
+  }, [jobId, selectedVariantKey])
   const bounds = useMapBounds(api, jobId, selected?.variantId)
   const depthQueries = useMapFeatureCollections(api, jobId, selected && bounds.data ? [{
     layer: 'result' as const, variantId: selected.variantId, bbox: expandBoundsForMapQuery(bounds.data), limit: 1000,
-  }] : [], mode === 'depth', { maxFeatures: MAX_DEPTH_SCENE_FEATURES })
+  }] : [], mode === 'depth', { maxFeatures: MAX_DEPTH_SCENE_FEATURES, keepPreviousData: false })
   const paths = buildDepthPaths(depthQueries.flatMap((query) => query.data?.features ?? []))
   const activePath = selectDepthPath(paths, endpointKey)
   const sceneSegments = activePath ? toMetricSegments(activePath) : []
