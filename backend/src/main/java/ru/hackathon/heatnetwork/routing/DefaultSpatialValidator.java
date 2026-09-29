@@ -1,6 +1,7 @@
 package ru.hackathon.heatnetwork.routing;
 
 import java.math.BigDecimal;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -62,7 +63,7 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         checkTreeTopology(variant, nodeById, diagnostics);
         checkEdgeEndpoints(variant, nodeById, diagnostics);
         checkTurns(variant, diagnostics);
-        checkEdgeCrossings(variant, diagnostics);
+        checkEdgeCrossings(variant, nodeById, diagnostics);
         checkRestrictions(dataset, variant, nodeById, diagnostics);
         if (variant.mode == ru.hackathon.heatnetwork.model.Model.Mode.DEPTH) {
             new DepthSpatialValidation(catalog).validate(dataset, variant, diagnostics);
@@ -120,6 +121,34 @@ public final class DefaultSpatialValidator implements SpatialValidator {
             if (!rootIds.add(attachment.rootNodeId)) {
                 diagnostics.add(diag(null, "TOPOLOGY_VIOLATION",
                         "Duplicate attachment for root " + attachment.rootNodeId));
+            }
+        }
+
+        // Indegree alone permits a disconnected directed cycle. Together with the
+        // parent checks above, reachability from valid roots establishes a forest.
+        Map<String, List<String>> children = new HashMap<>();
+        for (Edge edge : variant.edges) {
+            children.computeIfAbsent(edge.fromNodeId, ignored -> new ArrayList<>()).add(edge.toNodeId);
+        }
+        ArrayDeque<String> pending = new ArrayDeque<>();
+        for (String rootId : rootIds) {
+            Node root = nodeById.get(rootId);
+            if (root == null || (root.kind != NodeKind.EXISTING_CHAMBER && root.kind != NodeKind.NEW_CHAMBER)) {
+                diagnostics.add(diag(null, "TOPOLOGY_VIOLATION", "Attachment must reference a chamber node: " + rootId));
+            } else pending.addLast(rootId);
+        }
+        Set<String> reachable = new HashSet<>();
+        while (!pending.isEmpty()) {
+            String id = pending.removeFirst();
+            if (!reachable.add(id)) continue;
+            for (String child : children.getOrDefault(id, List.of())) {
+                if (nodeById.containsKey(child)) pending.addLast(child);
+            }
+        }
+        for (Node node : variant.nodes) {
+            if (!reachable.contains(node.id)) {
+                diagnostics.add(diag(node.inputObjectId, "TOPOLOGY_VIOLATION",
+                        "Node " + node.id + " is not reachable from an attachment"));
             }
         }
 
@@ -194,7 +223,8 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         }
     }
 
-    private void checkEdgeCrossings(CalculatedVariant variant, List<Diagnostic> diagnostics) {
+    private void checkEdgeCrossings(CalculatedVariant variant, Map<String, Node> nodeById,
+                                    List<Diagnostic> diagnostics) {
         for (int i = 0; i < variant.edges.size(); i++) {
             for (int j = i + 1; j < variant.edges.size(); j++) {
                 Edge a = variant.edges.get(i);
@@ -202,21 +232,17 @@ public final class DefaultSpatialValidator implements SpatialValidator {
                 if (!a.geometry.intersects(b.geometry)) {
                     continue;
                 }
-                // Sharing a common endpoint node is fine.
-                if (a.toNodeId.equals(b.fromNodeId) || a.fromNodeId.equals(b.toNodeId)
-                        || a.fromNodeId.equals(b.fromNodeId) || a.toNodeId.equals(b.toNodeId)) {
-                    Geometry inter = a.geometry.intersection(b.geometry);
+                Geometry inter = a.geometry.intersection(b.geometry);
+                Set<String> sharedNodes = new HashSet<>(List.of(a.fromNodeId, a.toNodeId));
+                sharedNodes.retainAll(List.of(b.fromNodeId, b.toNodeId));
+                // Only isolated points at IDs shared by BOTH edges are allowed.
+                // A line overlap is invalid even when all its vertices are endpoints.
+                if (inter.getDimension() == 0 && !sharedNodes.isEmpty()) {
                     boolean onlyAtSharedNodes = true;
                     for (Coordinate c : inter.getCoordinates()) {
                         boolean atShared = false;
-                        for (String nodeId : new String[] {a.fromNodeId, a.toNodeId, b.fromNodeId, b.toNodeId}) {
-                            Node node = null;
-                            for (Node n : variant.nodes) {
-                                if (n.id.equals(nodeId)) {
-                                    node = n;
-                                    break;
-                                }
-                            }
+                        for (String nodeId : sharedNodes) {
+                            Node node = nodeById.get(nodeId);
                             if (node != null && node.geometry.getCoordinate().distance(c) <= TOL) {
                                 atShared = true;
                                 break;
@@ -226,16 +252,15 @@ public final class DefaultSpatialValidator implements SpatialValidator {
                             onlyAtSharedNodes = false;
                             break;
                         }
-                        if (!onlyAtSharedNodes) {
-                            break;
-                        }
                     }
                     if (onlyAtSharedNodes) {
                         continue;
                     }
                 }
-                diagnostics.add(diag(null, "TOPOLOGY_VIOLATION",
-                        "New edges " + a.id + " and " + b.id + " cross outside a shared node"));
+                Diagnostic diagnostic = diag(null, "TOPOLOGY_VIOLATION",
+                        "New edges " + a.id + " and " + b.id + " overlap or cross outside a shared node");
+                diagnostic.segmentId = a.id;
+                diagnostics.add(diagnostic);
             }
         }
     }
