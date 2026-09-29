@@ -7,9 +7,10 @@ import { objectIdKey } from '../../shared/model/object-id'
 import { mapQueryKey, serializeBbox } from './map-query'
 
 export const MAX_DEPTH_SCENE_FEATURES = 2_000
+export const MAX_DEPTH_LOAD_FEATURES = 10_000
 
 interface MapFeatureCollectionOptions {
-  readonly maxFeatures?: number
+  readonly maxLoadFeatures?: number
   readonly keepPreviousData?: boolean
 }
 
@@ -17,24 +18,12 @@ function abortIfNeeded(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException('Запрос карты отменён', 'AbortError')
 }
 
-function featurePartCount(feature: MapPage['features'][number]): number {
-  const { geometry } = feature
-  const lineParts = (points: readonly unknown[]) => Math.max(1, points.length - 1)
-  switch (geometry.type) {
-    case 'LineString': return lineParts(geometry.coordinates)
-    case 'MultiLineString': return geometry.coordinates.reduce((sum, line) => sum + lineParts(line), 0)
-    case 'Polygon': return geometry.coordinates.reduce((sum, ring) => sum + lineParts(ring), 0)
-    case 'MultiPolygon': return geometry.coordinates.reduce((sum, polygon) => sum + polygon.reduce((ringSum, ring) => ringSum + lineParts(ring), 0), 0)
-    default: return 1
-  }
-}
-
 export async function loadMapFeatures(
   api: HeatNetworkApi,
   jobId: string,
   query: MapQuery,
   signal: AbortSignal,
-  maxFeatures?: number,
+  maxLoadFeatures?: number,
 ): Promise<MapPage> {
   const [minLon, minLat, maxLon, maxLat] = query.bbox
   serializeBbox({ minLon, minLat, maxLon, maxLat })
@@ -42,23 +31,22 @@ export async function loadMapFeatures(
   if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
     throw new Error('Размер страницы карты должен быть от 1 до 5000')
   }
-  if (maxFeatures !== undefined && (!Number.isInteger(maxFeatures) || maxFeatures < 1)) {
+  if (maxLoadFeatures !== undefined && (!Number.isInteger(maxLoadFeatures) || maxLoadFeatures < 1)) {
     throw new Error('Предел объектов карты должен быть положительным целым числом')
   }
   const features: MapPage['features'][number][] = []
-  let featureParts = 0
+  let featureCount = 0
   const seenCursors = new Set<string>()
   let cursor: string | undefined
   do {
     abortIfNeeded(signal)
     const page = await api.getMapPage(jobId, { ...query, cursor }, signal)
     abortIfNeeded(signal)
-    const pageParts = page.features.reduce((sum, feature) => sum + featurePartCount(feature), 0)
-    if (maxFeatures !== undefined && featureParts + pageParts > maxFeatures) {
-      throw new Error(`Превышен предел объектов для глубинной сцены: ${maxFeatures}`)
+    if (maxLoadFeatures !== undefined && featureCount + page.features.length > maxLoadFeatures) {
+      throw new Error(`Превышен предел загрузки объектов карты: ${maxLoadFeatures}`)
     }
     features.push(...page.features)
-    featureParts += pageParts
+    featureCount += page.features.length
     cursor = page.nextCursor ?? undefined
     if (cursor) {
       if (seenCursors.has(cursor)) throw new Error('Сервер вернул цикл курсоров карты')
@@ -98,7 +86,7 @@ export function useMapFeatureCollections(
   return useQueries({
     queries: queries.map((query) => ({
       queryKey: mapQueryKey(jobId, query),
-      queryFn: ({ signal }: { signal: AbortSignal }) => loadMapFeatures(api, jobId, query, signal, options.maxFeatures),
+      queryFn: ({ signal }: { signal: AbortSignal }) => loadMapFeatures(api, jobId, query, signal, options.maxLoadFeatures),
       ...(options.keepPreviousData === false
         ? {}
         : { placeholderData: (previous: MapPage | undefined) => previous }),
