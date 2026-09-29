@@ -85,7 +85,7 @@ final class SpecialPasses {
                         && obstacle.geometry.distance(line.factory.createPoint(rootPoint)) <= tolerance) {
                     continue;
                 }
-                checkAngle(edgeId, line, obstacle, crossing, tolerance);
+                checkAngle(edgeId, line, obstacle, crossing);
                 double extension = obstacle.rule.extensionEachSideM == null ? 0 : obstacle.rule.extensionEachSideM;
                 double start = crossing[0] - extension;
                 double end = crossing[1] + extension;
@@ -187,14 +187,19 @@ final class SpecialPasses {
         out.add(new double[] {min, max});
     }
 
-    private static void checkAngle(String edgeId, Polyline line, Obstacle obstacle, double[] crossing,
-                                   double tolerance) throws Rejection {
+    private static void checkAngle(String edgeId, Polyline line, Obstacle obstacle, double[] crossing)
+            throws Rejection {
         Double minimum = obstacle.rule.minAngleDeg;
         if (minimum == null) {
             return;
         }
-        Geometry reference = obstacle.geometry instanceof Polygonal ? obstacle.geometry.getBoundary() : obstacle.geometry;
-        for (double position : new double[] {crossing[0], crossing[1]}) {
+        boolean polygon = obstacle.geometry instanceof Polygonal;
+        Geometry reference = polygon ? obstacle.geometry.getBoundary() : obstacle.geometry;
+        // Clarification 6 requires the polygon entry angle, not its exit angle.
+        // Crossings are already ordered along the directed route; each separate
+        // interval (including re-entry after holes) is checked by split().
+        double[] positions = polygon ? new double[] {crossing[0]} : new double[] {crossing[0], crossing[1]};
+        for (double position : positions) {
             int segment = line.segmentAt(position);
             Coordinate a = line.points[segment];
             Coordinate b = line.points[segment + 1];
