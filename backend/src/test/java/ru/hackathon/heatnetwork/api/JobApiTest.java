@@ -61,6 +61,8 @@ class JobApiTest {
         assertEquals("no-store", variants.getHeaders().getCacheControl());
         assertEquals(1, variants.getBody().size(), "complete candidate replaces intermediate partial result");
         assertEquals(0, variants.getBody().get(0).path("unconnected_oks_ids").size());
+        String rawVariants = http.getForObject(location + "/variants", String.class);
+        assertFalse(rawVariants.matches("(?s).*\\d[eE][+-]?\\d.*"), "no exponent notation in costs: " + rawVariants);
         ResponseEntity<byte[]> download = http.getForEntity(location + "/result", byte[].class);
         assertEquals(200, download.getStatusCodeValue());
         assertEquals("application/geo+json", download.getHeaders().getContentType().toString());

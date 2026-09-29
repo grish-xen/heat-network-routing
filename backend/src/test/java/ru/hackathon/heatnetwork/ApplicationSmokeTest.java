@@ -19,7 +19,7 @@ class ApplicationSmokeTest {
         ResponseEntity<JsonNode> health = http.getForEntity("/api/health", JsonNode.class);
         assertEquals(200, health.getStatusCodeValue());
         assertNotNull(health.getBody());
-        assertEquals("skeleton", health.getBody().get("implementation").asText());
+        assertEquals("2d+depth", health.getBody().get("implementation").asText());
         assertEquals("1.0", health.getBody().get("contractVersion").asText());
         ResponseEntity<JsonNode> spec = http.getForEntity("/v3/api-docs", JsonNode.class);
         assertEquals(200, spec.getStatusCodeValue());

@@ -42,8 +42,10 @@ final class FileJobStore implements AutoCloseable {
     /** {@code records} null: status and summaries as JSON files next to the job files. */
     FileJobStore(Path directory, ObjectMapper mapper, JobRecords records) throws IOException {
         this.directory = directory.toAbsolutePath().normalize();
+        // Exact decimals: summaries read back from the export keep 41000000.00 instead of 4.1E+7.
         this.mapper = mapper.copy().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-                .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
+                .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
+                .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
         Files.createDirectories(this.directory);
         this.records = records != null ? records : new FileJobRecords(this.directory, this.mapper);
         lockChannel = FileChannel.open(this.directory.resolve(".lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
