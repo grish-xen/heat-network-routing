@@ -423,12 +423,14 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         // Overlaps split one physical pass into several priced edges (clarification 8).
         // Restore only the straight, connected continuation marked for this restriction.
         line = completeSpecialPass(edge, restriction.id, nodeById, incoming, outgoing);
-        if (rule.minAngleDeg != null && restriction.geometry instanceof LineString) {
-            double angle = crossingAngle(line, (LineString) restriction.geometry);
-            if (angle + TOL < rule.minAngleDeg) {
-                diagnostics.add(diag(restriction.id, "SPECIAL_PASS_VIOLATION",
+        if (rule.minAngleDeg != null) {
+            double angle = SpecialCrossingAngles.minimum(line, restriction.geometry);
+            if (angle + 1e-9 < rule.minAngleDeg) {
+                Diagnostic diagnostic = diag(restriction.id, "SPECIAL_PASS_VIOLATION",
                         "Edge " + edge.id + " crosses " + restriction.type
-                                + " at " + angle + " degrees; minimum is " + rule.minAngleDeg));
+                                + " at " + angle + " degrees; minimum is " + rule.minAngleDeg);
+                diagnostic.segmentId = edge.id;
+                diagnostics.add(diagnostic);
             }
         }
         double extension = rule.extensionEachSideM == null ? 0.0 : rule.extensionEachSideM;
@@ -516,18 +518,6 @@ public final class DefaultSpatialValidator implements SpatialValidator {
         double along = ((crossing.x - a.x) * (b.x - a.x)
                 + (crossing.y - a.y) * (b.y - a.y)) / length;
         return along < extension - TOL || length - along < extension - TOL;
-    }
-
-    private double crossingAngle(LineString route, LineString restriction) {
-        Coordinate a = route.getCoordinateN(0);
-        Coordinate b = route.getCoordinateN(1);
-        Coordinate c = restriction.getCoordinateN(0);
-        Coordinate d = restriction.getCoordinateN(restriction.getNumPoints() - 1);
-        double routeAngle = Math.atan2(b.y - a.y, b.x - a.x);
-        double restrictionAngle = Math.atan2(d.y - c.y, d.x - c.x);
-        double degrees = Math.toDegrees(Math.abs(routeAngle - restrictionAngle));
-        degrees %= 180.0;
-        return degrees > 90.0 ? 180.0 - degrees : degrees;
     }
 
     /** Crossing the own OKS polygon is allowed only by one final straight approach to the target. */
