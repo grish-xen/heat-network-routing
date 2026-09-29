@@ -21,7 +21,10 @@ import ru.hackathon.heatnetwork.model.Dataset;
 import ru.hackathon.heatnetwork.model.Model.CalculatedVariant;
 import ru.hackathon.heatnetwork.output.ResultExporter;
 
-/** Small durable status files, one at a time; no in-memory registry of completed jobs. */
+/**
+ * Job storage: large files (upload, result GeoJSON, map archives) in the storage directory and job
+ * metadata through {@link JobRecords} (PostgreSQL when configured). No in-memory registry of completed jobs.
+ */
 final class FileJobStore implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(FileJobStore.class);
     private static final Pattern ID = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
@@ -30,12 +33,19 @@ final class FileJobStore implements AutoCloseable {
     private final ObjectMapper mapper;
     private final FileChannel lockChannel;
     private final FileLock lock;
+    private final JobRecords records;
 
     FileJobStore(Path directory, ObjectMapper mapper) throws IOException {
+        this(directory, mapper, null);
+    }
+
+    /** {@code records} null: status and summaries as JSON files next to the job files. */
+    FileJobStore(Path directory, ObjectMapper mapper, JobRecords records) throws IOException {
         this.directory = directory.toAbsolutePath().normalize();
         this.mapper = mapper.copy().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                 .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
         Files.createDirectories(this.directory);
+        this.records = records != null ? records : new FileJobRecords(this.directory, this.mapper);
         lockChannel = FileChannel.open(this.directory.resolve(".lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         try {
             lock = lockChannel.tryLock();
@@ -55,10 +65,9 @@ final class FileJobStore implements AutoCloseable {
 
     Path input(String id) { return path(id, ".geojson"); }
 
-    /** Export is private until both files exist and the caller persists SUCCEEDED. */
+    /** Export is private until the file and its summaries exist and the caller persists SUCCEEDED. */
     void writeResult(String id, Dataset dataset, List<CalculatedVariant> variants, ResultExporter exporter) throws IOException {
         Path temporary = path(id, ".result.geojson.tmp");
-        Path summaries = path(id, ".variants.json.tmp");
         try {
             try (OutputStream output = Files.newOutputStream(temporary, StandardOpenOption.CREATE_NEW)) {
                 exporter.write(dataset, variants, output);
@@ -66,13 +75,11 @@ final class FileJobStore implements AutoCloseable {
             CalculationCoordinator.interrupted();
             List<VariantSummaryView> views = ResultSummaries.read(temporary, mapper);
             if (views.size() != variants.size()) throw new IOException("Missing exported summary");
-            mapper.writeValue(summaries.toFile(), views);
             CalculationCoordinator.interrupted();
             publish(temporary, path(id, ".result.geojson"));
-            publish(summaries, path(id, ".variants.json"));
+            records.saveVariants(id, views);
         } finally {
             Files.deleteIfExists(temporary);
-            Files.deleteIfExists(summaries);
         }
     }
 
@@ -81,10 +88,8 @@ final class FileJobStore implements AutoCloseable {
     }
 
     void writeMaps(String id) throws IOException {
-        List<VariantSummaryView> views;
-        try (InputStream input = Files.newInputStream(path(id, ".variants.json"))) {
-            views = Arrays.asList(mapper.readValue(input, VariantSummaryView[].class));
-        }
+        List<VariantSummaryView> views = records.variants(id)
+                .orElseThrow(() -> new IOException("Missing exported summaries"));
         List<String> variants = new java.util.ArrayList<>();
         for (VariantSummaryView view : views) variants.add(view.variantId.value().textValue());
         try {
@@ -128,9 +133,8 @@ final class FileJobStore implements AutoCloseable {
 
     synchronized List<VariantSummaryView> variants(String id) throws IOException {
         requireResult(id);
-        try (InputStream input = Files.newInputStream(path(id, ".variants.json"))) {
-            return Arrays.asList(mapper.readValue(input, VariantSummaryView[].class));
-        }
+        return records.variants(id).orElseThrow(() -> new ApiException(409, "RESULT_UNAVAILABLE",
+                "Сохранённый результат утрачен. Загрузите файл повторно."));
     }
 
     synchronized Download download(String id) throws IOException {
@@ -141,10 +145,11 @@ final class FileJobStore implements AutoCloseable {
     }
 
     private void requireResult(String id) throws IOException {
-        if (!validId(id) || !Files.isRegularFile(path(id, ".json"))) {
+        StoredJob stored = validId(id) ? records.find(id).orElse(null) : null;
+        if (stored == null) {
             throw new ApiException(404, "JOB_NOT_FOUND", "Задача не найдена или срок её хранения истёк.");
         }
-        if (get(id).status != JobView.Status.SUCCEEDED) {
+        if (stored.job.status != JobView.Status.SUCCEEDED) {
             throw new ApiException(409, "RESULT_NOT_READY", "Результат доступен только после успешного завершения задачи.");
         }
     }
@@ -156,9 +161,10 @@ final class FileJobStore implements AutoCloseable {
     }
 
     void removeResult(String id) throws IOException {
-        for (String suffix : List.of(".result.geojson.tmp", ".variants.json.tmp", ".result.geojson", ".variants.json")) {
+        for (String suffix : List.of(".result.geojson.tmp", ".result.geojson")) {
             Files.deleteIfExists(path(id, suffix));
         }
+        records.deleteVariants(id);
         for (String suffix : MAP_FILES) {
             Files.deleteIfExists(path(id, suffix + ".tmp"));
             Files.deleteIfExists(path(id, suffix));
@@ -170,26 +176,16 @@ final class FileJobStore implements AutoCloseable {
     synchronized JobView get(String id) throws IOException { return read(id).job; }
 
     private StoredJob read(String id) throws IOException {
-        StoredJob stored;
-        try (InputStream input = Files.newInputStream(path(id, ".json"))) {
-            stored = mapper.readValue(input, StoredJob.class);
-        }
+        if (!validId(id)) throw new IllegalArgumentException("Invalid server job ID");
+        StoredJob stored = records.find(id).orElseThrow(() -> new NoSuchFileException(id));
         if (stored.job == null || !id.equals(stored.job.jobId) || stored.updatedAt == null
                 || stored.job.status == null || stored.job.stage == null) throw new IOException("Invalid stored job");
         return stored;
     }
 
     synchronized void save(JobView job) throws IOException {
-        Path temporary = path(job.jobId, ".json.tmp");
-        try {
-            StoredJob stored = new StoredJob();
-            stored.job = job;
-            stored.updatedAt = Instant.now();
-            mapper.writeValue(temporary.toFile(), stored);
-            publish(temporary, path(job.jobId, ".json"));
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
+        if (!validId(job.jobId)) throw new IllegalArgumentException("Invalid server job ID");
+        records.save(job);
     }
 
     void removeInput(String id) throws IOException { Files.deleteIfExists(input(id)); }
@@ -197,8 +193,7 @@ final class FileJobStore implements AutoCloseable {
     synchronized void delete(String id) throws IOException {
         removeInput(id);
         removeResult(id);
-        Files.deleteIfExists(path(id, ".json.tmp"));
-        Files.deleteIfExists(path(id, ".json"));
+        records.delete(id);
     }
 
     synchronized void recover() throws IOException {
@@ -211,7 +206,7 @@ final class FileJobStore implements AutoCloseable {
                     save(job);
                 }
                 if (job.status == JobView.Status.SUCCEEDED
-                        && (!Files.isRegularFile(path(id, ".result.geojson")) || !Files.isRegularFile(path(id, ".variants.json")))) {
+                        && (!Files.isRegularFile(path(id, ".result.geojson")) || records.variants(id).isEmpty())) {
                     job = job.failed(List.of(new ApiError("RESULT_UNAVAILABLE", "Сохранённый результат утрачен. Загрузите файл повторно.")));
                     save(job);
                 }
@@ -242,12 +237,8 @@ final class FileJobStore implements AutoCloseable {
     }
 
     private void forEachStatus(Consumer<String> action) throws IOException {
-        try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.json")) {
-            for (Path file : files) {
-                String name = file.getFileName().toString();
-                String id = name.substring(0, name.length() - 5);
-                if (validId(id)) action.accept(id);
-            }
+        for (String id : records.ids()) {
+            if (validId(id)) action.accept(id);
         }
     }
 

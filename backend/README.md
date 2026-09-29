@@ -15,4 +15,4 @@ JTS 1.19.0 задаёт единую модель геометрии для мо
 
 [Модуль output](../docs/OUTPUT_MODULE.md) уже предоставляет Spring bean `ResultExporter` для потокового 2D GeoJSON. Он принимает рассчитанные варианты; подключение координатора и HTTP-выдача результата остаются следующим этапом.
 
-Dockerfile собирает и проверяет приложение на Java 11. Compose поднимает PostgreSQL 16 как заготовку инфраструктуры. `DB_URL`, `DB_USER`, `DB_PASSWORD` пока не читаются приложением; участник 1 подключит их вместе с JDBC и миграциями.
+Dockerfile собирает и проверяет приложение на Java 11. Compose поднимает PostgreSQL 16 и передаёт `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`. С ними статусы задач и сводки вариантов хранятся в PostgreSQL; схема `src/main/resources/db/schema.sql` создаётся при запуске. Без них backend работает с JSON-файлами — для локальной разработки и тестов.
