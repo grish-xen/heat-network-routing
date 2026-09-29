@@ -61,6 +61,44 @@ async function result(item) {
 }
 async function depthViews(item) {
   const canvas = page.locator('.depth-scene-canvas canvas');
+  const loadError = page.locator('.depth-visualization-state [role="alert"]');
+  await canvas.or(loadError).first().waitFor({ timeout: 30000 });
+  if (await loadError.isVisible()) {
+    item.depthLoadError = await loadError.innerText();
+    item.mapBudgetDiagnostics = await page.evaluate(async ({ jobId, variantId }) => {
+      const { HttpHeatNetworkApi } = await import('/src/shared/api/http-api.ts');
+      const { loadMapFeatures, MAX_DEPTH_SCENE_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
+      const { expandBoundsForMapQuery } = await import('/src/features/network-map/map-query.ts');
+      const { buildDepthPaths, toMetricSegments, toSceneCommunications, sceneOrigin } = await import('/src/features/depth-profile/depth-path.ts');
+      const api = new HttpHeatNetworkApi();
+      const id = { kind: 'string', value: variantId };
+      const bbox = expandBoundsForMapQuery(await api.getMapBounds(jobId, id));
+      const query = { layer: 'input', bbox, limit: 1000 };
+      let boundedInputError = null;
+      try { await loadMapFeatures(api, jobId, query, new AbortController().signal, MAX_DEPTH_SCENE_FEATURES); }
+      catch (error) { boundedInputError = error.message; }
+      // Diagnostic only, on our fixed competition fixture: read the accepted
+      // HTTP pages without the UI's cap, never create GPU geometry from them.
+      const input = await loadMapFeatures(api, jobId, query, new AbortController().signal);
+      const result = await loadMapFeatures(api, jobId, { ...query, layer: 'result', variantId: id }, new AbortController().signal);
+      const active = buildDepthPaths(result.features)[0];
+      const parts = geometry => {
+        const line = points => Math.max(1, points.length - 1);
+        if (geometry.type === 'LineString') return line(geometry.coordinates);
+        if (['MultiLineString', 'Polygon'].includes(geometry.type)) return geometry.coordinates.reduce((n, p) => n + line(p), 0);
+        if (geometry.type === 'MultiPolygon') return geometry.coordinates.reduce((n, rings) => n + rings.reduce((m, p) => m + line(p), 0), 0);
+        return 1;
+      };
+      return { limit: MAX_DEPTH_SCENE_FEATURES, boundedInputError, inputFeatures: input.features.length,
+        inputGeometryParts: input.features.reduce((n, f) => n + parts(f.geometry), 0),
+        routeParts: active ? toMetricSegments(active).length : 0,
+        communicationParts: active ? toSceneCommunications(input.features, sceneOrigin(active)).length : 0 };
+    }, { jobId: item.jobId, variantId: item.variants[0].variant_id });
+    await page.getByRole('tab', { name: 'Профиль', exact: true }).click();
+    item.profileBlockedBySameError = await loadError.isVisible();
+    finding('depth-input-budget-blocks-result', item.depthLoadError, item.mapBudgetDiagnostics);
+    throw new Error(`Depth visualization blocked for ${item.name}; see mapBudgetDiagnostics`);
+  }
   await canvas.waitFor({ timeout: 30000 });
   await page.waitForTimeout(600);
   item.sceneText = await page.getByLabel('Свойства выбранного участка', { exact: true }).innerText();
