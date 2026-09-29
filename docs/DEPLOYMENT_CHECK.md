@@ -43,8 +43,8 @@ Workflow [compose.yml](../.github/workflows/compose.yml) запускается 
 
 Каждое задание:
 
-1. Проверяет Compose config и собирает неизменённый `backend/Dockerfile`, включая `mvn verify` на Java 11.
-2. Запускает backend и PostgreSQL через Compose, задаёт heap 512 МиБ только для этого стенда и ждёт health.
+1. Проверяет Compose config и собирает неизменённые `backend/Dockerfile` (включая `mvn verify` на Java 11) и `frontend/Dockerfile`.
+2. Запускает интерфейс, backend и PostgreSQL через Compose, задаёт heap 512 МиБ только для этого стенда и ждёт health напрямую и через nginx. Проверяет, что nginx отдаёт страницу интерфейса и OpenAPI. Capture и verify идут через прокси на порту 8081, как у пользователя: загрузка, скачивание и страницы карты проходят через nginx.
 3. Выполняет capture, удаляет контейнеры через `down` с сохранением томов и запускает проект заново.
 4. Проверяет, что ID backend-контейнера изменился, а имя подключённого тома задач сохранилось; выполняет verify.
 5. Сохраняет snapshot, отчёты и журналы как `compose-<version>-reports` на семь дней. Удаляет только изолированный CI-проект и его тома; имя включает run ID, попытку и версию Compose.
