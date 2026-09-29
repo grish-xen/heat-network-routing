@@ -50,6 +50,7 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
   const sceneCommunications = activePath && sceneOrigin(activePath)
     ? toSceneCommunications(inputQueries.flatMap((query) => query.data?.features ?? []), sceneOrigin(activePath)!)
     : []
+  const sceneObjectLimitExceeded = sceneSegments.length + sceneCommunications.length > MAX_DEPTH_SCENE_FEATURES
   const depthLoading = mode === 'depth' && (bounds.isPending || depthQueries.some((query) => query.isPending) || inputQueries.some((query) => query.isPending))
   const depthError = mode === 'depth'
     ? (bounds.isError ? bounds.error : depthQueries.find((query) => query.isError)?.error ?? inputQueries.find((query) => query.isError)?.error)
@@ -117,7 +118,8 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
         {view !== 'map' && depthLoading && <div className="depth-visualization-state"><Spinner /> Загружаем профиль и 3D-сцену…</div>}
         {view !== 'map' && !depthLoading && depthError && <div className="depth-visualization-state"><Alert>{depthErrorText}</Alert><Button type="button" className="button--secondary" onClick={retryDepth}>Повторить загрузку</Button></div>}
         {view === 'profile' && !depthLoading && !depthError && <DepthProfile segments={sceneSegments} />}
-        {view === '3d' && !depthLoading && !depthError && <DepthScene segments={sceneSegments} communications={sceneCommunications} />}
+        {view === '3d' && !depthLoading && !depthError && sceneObjectLimitExceeded && <div className="depth-visualization-state"><Alert>Превышен предел объектов для 3D-сцены. Сузьте расчёт или скачайте GeoJSON.</Alert></div>}
+        {view === '3d' && !depthLoading && !depthError && !sceneObjectLimitExceeded && <DepthScene segments={sceneSegments} communications={sceneCommunications} />}
       </section>
     </main>
   )

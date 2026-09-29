@@ -8,6 +8,7 @@ import { ApiClientError } from '../../shared/api/api-error'
 import type { MapFeature, MapPage, VariantSummary } from '../../shared/model/api'
 
 const mapMock = vi.hoisted(() => ({ render: vi.fn(), unavailable: false }))
+const sceneMock = vi.hoisted(() => ({ render: vi.fn() }))
 vi.mock('../network-map/NetworkMap', () => ({
   NetworkMap: (props: { onUnavailable?: (reason: string) => void }) => {
     mapMock.render(props)
@@ -15,7 +16,7 @@ vi.mock('../network-map/NetworkMap', () => ({
     return null
   },
 }))
-vi.mock('../network-3d/DepthScene', () => ({ DepthScene: () => <div>3D-сцена</div> }))
+vi.mock('../network-3d/DepthScene', () => ({ DepthScene: (props: unknown) => { sceneMock.render(props); return <div>3D-сцена</div> } }))
 
 import { ResultWorkspace } from './ResultWorkspace'
 
@@ -60,7 +61,7 @@ function apiForDepthMap(getMapPage: HeatNetworkApi['getMapPage']): HeatNetworkAp
   return depthApi
 }
 
-beforeEach(() => { mapMock.unavailable = false; mapMock.render.mockReset() })
+beforeEach(() => { mapMock.unavailable = false; mapMock.render.mockReset(); sceneMock.render.mockReset() })
 
 describe('ResultWorkspace', () => {
   it('selects the lowest server rank and passes the exact selected ID with the input layer to the map', async () => {
@@ -174,5 +175,25 @@ describe('ResultWorkspace', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/слишком большой объём/i)
     expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
+  })
+
+  it('blocks a 3D scene when route and communication parts exceed their shared limit', async () => {
+    const coordinates = Array.from({ length: 1201 }, (_, index) => [37.4 + index * 0.000001, 55.6] as const)
+    const route = { ...depthEdge({ kind: 'string', value: 'consumer' }), geometry: { type: 'LineString' as const, coordinates } }
+    const gas: MapFeature = {
+      type: 'Feature', geometry: { type: 'LineString', coordinates },
+      properties: { id: { kind: 'string', value: 'gas' }, objectType: 'restriction', restrictionType: 'gas_pipeline' },
+    }
+    const depthApi = apiForDepthMap(vi.fn((_jobId, mapQuery) => Promise.resolve({
+      type: 'FeatureCollection' as const,
+      features: mapQuery.layer === 'result' ? [route] : [gas],
+      nextCursor: null,
+    })))
+
+    renderWorkspace('depth', depthApi)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/превышен предел объектов.*3d/i)
+    expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
+    expect(sceneMock.render).not.toHaveBeenCalled()
   })
 })
