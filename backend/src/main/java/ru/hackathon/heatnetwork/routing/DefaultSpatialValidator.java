@@ -28,7 +28,7 @@ import ru.hackathon.heatnetwork.model.ObjectId;
  * <p>Checks (2D mode, EPSG:32637): tree topology per component with exactly one
  * attachment; one parent edge per node; branching only in cameras with the
  * four-adjacency limit counting existing lines through existing chambers; no cycles
- * or edge crossings outside shared nodes; turn angle at every polyline vertex
+ * or edge crossings outside shared nodes; turn angle at every polyline vertex and directed edge join
  * at most 90°; clearance of the sized pipe-pair half-width to forbidden and special
  * restrictions (clearance inside a legitimate special crossing is not checked);
  * crossing the own OKS polygon only by the final straight approach.</p>
@@ -171,7 +171,9 @@ public final class DefaultSpatialValidator implements SpatialValidator {
 
     private void checkTurns(CalculatedVariant variant, List<Diagnostic> diagnostics) {
         double maxCos = 0.0; // cos of the max allowed turn (90°) is 0; turn angle in (90..180) => cos < 0
+        Map<String, List<CalculatedEdge>> incoming = new HashMap<>();
         for (CalculatedEdge edge : variant.edges) {
+            incoming.computeIfAbsent(edge.toNodeId, ignored -> new ArrayList<>()).add(edge);
             Coordinate[] coords = edge.geometry.getCoordinates();
             for (int i = 1; i + 1 < coords.length; i++) {
                 double d1x = coords[i].x - coords[i - 1].x;
@@ -189,6 +191,33 @@ public final class DefaultSpatialValidator implements SpatialValidator {
                 if (cos < maxCos - 1e-9) {
                     diagnostics.add(diag(null, "TURN_VIOLATION",
                             "Turn above 90° in edge " + edge.id + " at vertex " + i));
+                }
+            }
+        }
+        // Splitting a polyline at a chamber or technical node must not hide a turn.
+        // Compare each parent with each child, never two sibling branches. A root
+        // has no incoming new edge and therefore no directed join to check here.
+        for (CalculatedEdge child : variant.edges) {
+            for (CalculatedEdge parent : incoming.getOrDefault(child.fromNodeId, List.of())) {
+                Coordinate[] before = parent.geometry.getCoordinates();
+                Coordinate[] after = child.geometry.getCoordinates();
+                if (before.length < 2 || after.length < 2) continue; // Endpoint validation reports this.
+                double ax = before[before.length - 1].x - before[before.length - 2].x;
+                double ay = before[before.length - 1].y - before[before.length - 2].y;
+                double bx = after[1].x - after[0].x;
+                double by = after[1].y - after[0].y;
+                double a = Math.hypot(ax, ay), b = Math.hypot(bx, by);
+                String message = null;
+                if (a < 1e-9 || b < 1e-9) {
+                    message = "Zero-length segment at node " + child.fromNodeId;
+                } else if ((ax * bx + ay * by) / (a * b) < maxCos - 1e-9) {
+                    message = "Turn above 90° at node " + child.fromNodeId
+                            + " from edge " + parent.id + " to edge " + child.id;
+                }
+                if (message != null) {
+                    Diagnostic diagnostic = diag(null, "TURN_VIOLATION", message);
+                    diagnostic.segmentId = child.id;
+                    diagnostics.add(diagnostic);
                 }
             }
         }

@@ -391,7 +391,8 @@ public final class GridRoutePlanner {
                     continue;
                 }
                 List<Coordinate> path = aStar(tap.point, goal, target.ownOksPolygonId, diameter,
-                        25.0, null, tap.parentTargetId, tap.point);
+                        25.0, null, tap.parentTargetId, tap.point,
+                        acceptedTraces.get(tap.parentTargetId).points.get(tap.vertexIndex - 1));
                 if (path == null) {
                     continue;
                 }
@@ -427,7 +428,7 @@ public final class GridRoutePlanner {
             // grid, and recheck capacity because other targets may have connected.
             if (newEdgeBudget(tie) < 1 || !state.triedTies.add(step + ":" + rootKey(tie))) continue;
             List<Coordinate> path = aStar(tie.coordinate, goal, target.ownOksPolygonId, diameter,
-                    step, tie.exemptLineId, null, null);
+                    step, tie.exemptLineId, null, null, null);
             if (path == null) {
                 // Inline advance: same-target retry loop instead of returning to next().
                 continue;
@@ -698,17 +699,18 @@ public final class GridRoutePlanner {
     /** A* over the grid; returns coordinates from the start point to the goal, endpoints included. */
     private List<Coordinate> aStar(Coordinate start, Coordinate goal, ObjectId exemptOksPolygonId,
                                    int diameterMm, double step, ObjectId exemptLineId,
-                                   ObjectId parentTargetId, Coordinate tapPoint) {
+                                   ObjectId parentTargetId, Coordinate tapPoint, Coordinate initialPrevious) {
         long began = System.nanoTime();
         LOG.debug("A* start={} goal={} step={} branch={}", start, goal, step, parentTargetId != null);
-        List<Coordinate> result = searchGrid(start, goal, exemptOksPolygonId, diameterMm, step, exemptLineId, parentTargetId, tapPoint);
+        List<Coordinate> result = searchGrid(start, goal, exemptOksPolygonId, diameterMm, step,
+                exemptLineId, parentTargetId, tapPoint, initialPrevious);
         LOG.debug("A* vertices={} elapsedMs={}", result == null ? 0 : result.size(), (System.nanoTime() - began) / 1_000_000);
         return result;
     }
 
     private List<Coordinate> searchGrid(Coordinate start, Coordinate goal, ObjectId exemptOksPolygonId,
                                    int diameterMm, double step, ObjectId exemptLineId,
-                                   ObjectId parentTargetId, Coordinate tapPoint) {
+                                   ObjectId parentTargetId, Coordinate tapPoint, Coordinate initialPrevious) {
         // Search bounds: envelope of start/goal/chambers/lines, padded to allow routing around
         // large restrictions (rivers, parks). Use 3x straight-line distance (capped) instead of 10x
         // to avoid excessively large search areas that cause timeouts.
@@ -746,8 +748,10 @@ public final class GridRoutePlanner {
             // behind; discard it without repeating expensive spatial checks.
             if (entry.distance > gScore.get(currentKey) + 1e-9) continue;
             Coordinate current = coords.get(currentKey);
+            // A branch starts with its parent's incoming direction. Keep that
+            // context outside cameFrom so reconstruction still starts at the tap.
             Coordinate previous = cameFrom.containsKey(currentKey)
-                    ? coords.get(cameFrom.get(currentKey)) : null;
+                    ? coords.get(cameFrom.get(currentKey)) : initialPrevious;
             if (current.distance(goal) <= step * 1.5
                     && moveAllowed(current, goal, previous, exemptOksPolygonId, diameterMm,
                             exemptLineId, parentTargetId, tapPoint)) {
