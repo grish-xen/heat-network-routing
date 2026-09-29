@@ -46,7 +46,7 @@ curl -o result.geojson http://localhost:8080/api/jobs/<jobId>/result
 
 ## Координатор и отбор
 
-CalculationCoordinator открывает RoutePlanner.SearchSession основной стратегии (search-seed), а альтернативные стратегии (search-seed + 1, + 2) запускает параллельно в пределах alternative-timeout после её завершения; их лучшие разные варианты ранжируются вместе, диагностику полноты даёт только основная. Подробно — [SERVICE_OVERVIEW.md](SERVICE_OVERVIEW.md). Каждый кандидат передаётся VariantCalculator, результат — обратно через feedback, затем поиск продолжается до конца сессии или max-candidates. Режим Job передаётся поиску и калькулятору. Калькулятор сам вызывает SpatialValidator. Диагностика поискового бюджета сохраняется и при SUCCEEDED; наличие результата не скрывает остановку по лимиту.
+CalculationCoordinator открывает RoutePlanner.SearchSession основного старта (search-seed), а остальные старты (search-seed + 1 … + variant-strategies − 1) запускает параллельно, не более чем на «процессоры − 1» потоках, в пределах alternative-timeout после завершения основного; их лучшие варианты разных схем подключения ранжируются вместе, диагностику полноты даёт только основной. Подробно — [SERVICE_OVERVIEW.md](SERVICE_OVERVIEW.md). Каждый кандидат передаётся VariantCalculator, результат — обратно через feedback, затем поиск продолжается до конца сессии или max-candidates. Режим Job передаётся поиску и калькулятору. Калькулятор сам вызывает SpatialValidator. Диагностика поискового бюджета сохраняется и при SUCCEEDED; наличие результата не скрывает остановку по лимиту.
 
 - Отклонение кандидата не останавливает поиск. Внутреннее исключение завершает задачу с INTERNAL_ERROR.
 - Если допустимых вариантов нет, возвращается FAILED / ROUTE_NOT_FOUND и до 20 диагностик отклонения. Завершение бюджета не доказывает техническую невозможность подключения.
@@ -76,7 +76,7 @@ SUCCEEDED записывается после экспорта, сохранен
 | heat-network.jobs.retention | 24h |
 | heat-network.jobs.max-candidates | 100 |
 | heat-network.jobs.search-seed | 0 |
-| heat-network.jobs.variant-strategies | 3 |
+| heat-network.jobs.variant-strategies | 8 (1–16) |
 | heat-network.jobs.alternative-timeout | 60s |
 
 Предел multipart-запроса — предел файла плюс 1 МиБ. JobConfiguration создаёт единый MultipartConfigElement; отдельные spring.servlet.multipart.max-file-size здесь не применяются. Лимит 2 + 48 включает сохраняемые загрузки, очередь и выполняющиеся задачи; это не дисковая квота и не лимит HTTP-соединений. В Compose папка задаётся через HEATNETWORK_JOBS_STORAGEDIRECTORY; файлы находятся в томе job-data.

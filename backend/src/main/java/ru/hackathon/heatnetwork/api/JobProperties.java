@@ -18,8 +18,8 @@ public class JobProperties {
     @NotNull private Duration retention = Duration.ofHours(24);
     @Min(1) @Max(10000) private int maxCandidates = 100;
     private long searchSeed = 0;
-    /** Planner strategies run per job (seed, seed + 1, ...); up to three best distinct variants are kept. */
-    @Min(1) @Max(3) private int variantStrategies = 3;
+    /** Planner starts run per job (seed, seed + 1, ...); up to three best distinct variants are kept. */
+    @Min(1) @Max(16) private int variantStrategies = 8;
     /** Shared wall-clock budget of the alternative strategies, which run in parallel after the main one. */
     @NotNull private Duration alternativeTimeout = Duration.ofSeconds(60);
 

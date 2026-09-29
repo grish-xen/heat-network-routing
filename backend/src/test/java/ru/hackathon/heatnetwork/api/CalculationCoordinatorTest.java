@@ -117,6 +117,42 @@ class CalculationCoordinatorTest {
         verify(dataset, never()).close();
     }
 
+    @Test void aShiftedRouteOfTheSameSchemeIsNotAnotherVariant() throws Exception {
+        // Same attachment point and consumer, the route differs by 3 m: only the cheaper one is kept.
+        CalculatedVariant straight = scheme("straight", 0, 5, 4);
+        CalculatedVariant shifted = scheme("shifted", 3, 5, 6);
+        CalculatedVariant elsewhere = scheme("elsewhere", 0, 40, 9);
+        List<CalculatedVariant> candidates = List.of(shifted, straight, elsewhere);
+        AtomicInteger index = new AtomicInteger();
+        RoutePlanner.SearchSession session = session(candidates.size());
+        List<CalculatedVariant> selected = new CalculationCoordinator((d, o) -> session,
+                (d, c, m) -> accepted(c.candidateId, candidates.get(index.getAndIncrement())), oneStrategy())
+                .calculate(dataset, stage -> { });
+        assertEquals(2, selected.size());
+        assertSame(straight.edges, selected.get(0).edges);
+        assertSame(elsewhere.edges, selected.get(1).edges);
+    }
+
+    /** One chamber at (rootX, 0) serving consumer "p" at (100, 50) through a bend at (50, bendY). */
+    private CalculatedVariant scheme(String id, double bendY, double rootX, int score) {
+        CalculatedVariant variant = new CalculatedVariant(); variant.variantId = id; variant.mode = Mode.TWO_D;
+        Node root = new Node(); root.id = id + "-root"; root.kind = NodeKind.NEW_CHAMBER;
+        root.geometry = GF.createPoint(new Coordinate(400000 + rootX, 6170000));
+        Node point = new Node(); point.id = id + "-point"; point.kind = NodeKind.CONNECTION_POINT;
+        point.geometry = GF.createPoint(new Coordinate(400100, 6170050));
+        point.inputObjectId = new ObjectId(TextNode.valueOf("p"));
+        variant.nodes.add(root); variant.nodes.add(point);
+        CalculatedEdge edge = new CalculatedEdge(); edge.id = id + "-edge"; edge.fromNodeId = root.id; edge.toNodeId = point.id;
+        edge.geometry = GF.createLineString(new Coordinate[] {root.geometry.getCoordinate(),
+                new Coordinate(400050, 6170000 + bendY), point.geometry.getCoordinate()});
+        edge.flowTph = BigDecimal.ONE; edge.diameterMm = 80; edge.lengthM = edge.geometry.getLength();
+        edge.layingMethod = LayingMethod.BASE; edge.specialCoefficient = BigDecimal.ONE;
+        variant.edges.add(edge);
+        Attachment attachment = new Attachment(); attachment.rootNodeId = root.id; variant.attachments.add(attachment);
+        variant.summary = new Summary(); variant.summary.score = BigDecimal.valueOf(score);
+        return variant;
+    }
+
     @Test void signatureIgnoresGeneratedIdsAndListOrderInBothModes() throws Exception {
         for (Mode mode : Mode.values()) {
             CalculatedVariant first = profile("first", mode, 3.4, 1);
@@ -238,6 +274,7 @@ class CalculationCoordinatorTest {
                 "s7", variant("joint", 1, 5), "s8", variant("line-ties", 2, 9), "s9", variant("near-first", 3, 7));
         JobProperties properties = new JobProperties();
         properties.setSearchSeed(7);
+        properties.setVariantStrategies(3);
         List<ApiError> reported = new ArrayList<>();
         List<CalculatedVariant> selected = new CalculationCoordinator((d, options) -> {
             seeds.add(options.seed);
@@ -350,10 +387,12 @@ class CalculationCoordinatorTest {
     }
 
     // Calculator is a test double here; real engineering checks are exercised by JobApiTest.
+    // Each x is its own attachment point, so different x are different connection schemes.
     private CalculatedVariant variant(String id, double x, int score) {
         CalculatedVariant variant = new CalculatedVariant(); variant.variantId = id; variant.mode = Mode.TWO_D;
         Node node = new Node(); node.id = id + "-node"; node.kind = NodeKind.NEW_CHAMBER;
         node.geometry = GF.createPoint(new Coordinate(400000 + x, 6170000)); variant.nodes.add(node);
+        Attachment attachment = new Attachment(); attachment.rootNodeId = node.id; variant.attachments.add(attachment);
         variant.summary = new Summary(); variant.summary.score = BigDecimal.valueOf(score);
         return variant;
     }

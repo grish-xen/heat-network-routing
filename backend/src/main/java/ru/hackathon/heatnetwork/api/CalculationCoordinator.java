@@ -89,10 +89,11 @@ public final class CalculationCoordinator {
     }
 
     /**
-     * The other planner strategies (seed + 1, seed + 2) build their own complete schemes in parallel with the
-     * main one; their best distinct variants are ranked with the main result. They may run at most until the
-     * main search ends plus {@code alternative-timeout}; an unfinished one is interrupted and contributes
-     * nothing. They report no diagnostics: the main strategy alone decides whether the result is complete.
+     * The other planner starts (seed + 1, seed + 2, ...) build their own complete schemes in parallel with the
+     * main one; their best distinct variants are ranked with the main result. They run on at most one thread
+     * less than the processors and may run until the main search ends plus {@code alternative-timeout}; an
+     * unfinished one is interrupted and contributes nothing. They report no diagnostics: the main start alone
+     * decides whether the result is complete.
      */
     private final class Alternatives implements AutoCloseable {
         private final ExecutorService pool;
@@ -100,7 +101,8 @@ public final class CalculationCoordinator {
 
         Alternatives(Dataset dataset, Mode mode) {
             int count = properties.getVariantStrategies() - 1;
-            pool = count <= 0 ? null : Executors.newFixedThreadPool(count, work -> {
+            int threads = Math.min(count, Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
+            pool = count <= 0 ? null : Executors.newFixedThreadPool(threads, work -> {
                 Thread thread = new Thread(work, "heat-variant-" + UUID.randomUUID());
                 thread.setDaemon(true);
                 return thread;
@@ -178,7 +180,7 @@ public final class CalculationCoordinator {
 
     /**
      * Keeps the variant among the best three when no kept variant connects all of its consumers and more,
-     * and it is not a copy of a kept one (the cheaper copy wins).
+     * and it is neither a copy of a kept one nor the same connection scheme (the cheaper one wins).
      */
     private static void offer(CalculatedVariant variant, List<Choice> best, List<Set<ObjectId>> coverage)
             throws InterruptedIOException {
@@ -188,12 +190,14 @@ public final class CalculationCoordinator {
         if (!coverage.contains(missing)) coverage.add(missing);
         best.removeIf(old -> old.missing.size() > missing.size() && old.missing.containsAll(missing));
         String signature = signature(variant);
-        Choice duplicate = best.stream().filter(old -> old.signature.equals(signature)).findFirst().orElse(null);
+        String scheme = scheme(variant);
+        Choice duplicate = best.stream().filter(old -> old.signature.equals(signature) || old.scheme.equals(scheme))
+                .findFirst().orElse(null);
         if (duplicate != null) {
             if (duplicate.variant.summary.score.compareTo(variant.summary.score) <= 0) return;
             best.remove(duplicate);
         }
-        best.add(new Choice(variant, missing, signature));
+        best.add(new Choice(variant, missing, signature, scheme));
         best.sort(Comparator.comparing((Choice c) -> c.variant.summary.score).thenComparing(c -> c.signature));
         if (best.size() > 3) best.remove(3);
     }
@@ -237,6 +241,54 @@ public final class CalculationCoordinator {
         return Base64.getEncoder().encodeToString(digest.digest());
     }
 
+    /**
+     * The connection scheme of a variant: its attachment points (1 m) with the consumers each one serves and,
+     * in the depth mode, the depth levels used (0.5 m), which tell passes above and below apart. Variants of one
+     * scheme differ only by shifted routes, which section 2.8 of the case does not count as another variant.
+     */
+    static String scheme(CalculatedVariant variant) throws InterruptedIOException {
+        Map<String, Node> nodes = new HashMap<>();
+        for (Node node : variant.nodes) nodes.put(node.id, node);
+        Map<String, List<String>> children = new HashMap<>();
+        for (CalculatedEdge edge : variant.edges) {
+            children.computeIfAbsent(edge.fromNodeId, k -> new ArrayList<>()).add(edge.toNodeId);
+        }
+        List<String> parts = new ArrayList<>();
+        parts.add("mode:" + variant.mode);
+        for (Attachment attachment : variant.attachments) {
+            interrupted();
+            Node root = nodes.get(attachment.rootNodeId);
+            Coordinate c = root == null || root.geometry == null ? null : root.geometry.getCoordinate();
+            List<String> served = new ArrayList<>();
+            Deque<String> stack = new ArrayDeque<>();
+            Set<String> seen = new HashSet<>();
+            stack.push(attachment.rootNodeId);
+            seen.add(attachment.rootNodeId);
+            while (!stack.isEmpty()) {
+                Node node = nodes.get(stack.pop());
+                if (node == null) continue;
+                if (node.kind == NodeKind.CONNECTION_POINT) served.add(id(node.inputObjectId));
+                for (String child : children.getOrDefault(node.id, List.of())) {
+                    if (seen.add(child)) stack.push(child);
+                }
+            }
+            Collections.sort(served);
+            parts.add("root:" + (c == null ? "?" : Math.round(c.x) + "," + Math.round(c.y)) + ":"
+                    + id(attachment.existingObjectId) + ":" + served);
+        }
+        if (variant.mode == Mode.DEPTH) {
+            SortedSet<Long> levels = new TreeSet<>();
+            for (CalculatedEdge edge : variant.edges) {
+                if (edge.depthStartM != null) levels.add(Math.round(edge.depthStartM * 2));
+                if (edge.depthEndM != null) levels.add(Math.round(edge.depthEndM * 2));
+            }
+            parts.add("levels:" + levels);
+        }
+        for (ObjectId missing : variant.unconnectedPointIds) parts.add("missing:" + id(missing));
+        Collections.sort(parts);
+        return String.join("|", parts);
+    }
+
     private static String point(Coordinate c) { return Math.round(c.x * 1000) + "," + Math.round(c.y * 1000); }
     private static String id(ObjectId id) {
         if (id == null) return "null";
@@ -256,8 +308,9 @@ public final class CalculationCoordinator {
         final CalculatedVariant variant;
         final Set<ObjectId> missing;
         final String signature;
-        Choice(CalculatedVariant variant, Set<ObjectId> missing, String signature) {
-            this.variant = variant; this.missing = missing; this.signature = signature;
+        final String scheme;
+        Choice(CalculatedVariant variant, Set<ObjectId> missing, String signature, String scheme) {
+            this.variant = variant; this.missing = missing; this.signature = signature; this.scheme = scheme;
         }
     }
     static final class NoValidVariantException extends IOException {
