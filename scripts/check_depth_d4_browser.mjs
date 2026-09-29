@@ -47,8 +47,6 @@ try {
     const frame = cameraFrame(segments.flatMap(s => [s.start, s.end]), camera.aspect);
     camera.position.copy(frame.position); camera.lookAt(frame.target); camera.updateMatrixWorld();
     window.d4OriginalCanvas = canvas;
-    window.d4InitialCamera = { position: frame.position.toArray(), target: frame.target.toArray(),
-      points: segments.flatMap(s => [s.start, s.end]) };
     return segments.map((s, index) => {
       const at = new THREE.Vector3((s.start.x+s.end.x)/2, (s.start.y+s.end.y)/2,
         (s.start.z+s.end.z)/2 - s.heightM*2).project(camera);
@@ -71,21 +69,27 @@ try {
   await page.waitForTimeout(300);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.getByRole('button', { name: 'Сбросить ракурс', exact: true }).click();
-  report.checks.mobileResetProjection = await page.evaluate(async () => {
-    const THREE = await import('/node_modules/three/build/three.module.js');
-    const rect = document.querySelector('.depth-scene-canvas canvas').getBoundingClientRect();
-    const initial = window.d4InitialCamera;
-    const camera = new THREE.PerspectiveCamera(32, rect.width / rect.height, 0.1, 5000);
-    camera.position.fromArray(initial.position); camera.lookAt(new THREE.Vector3().fromArray(initial.target));
-    camera.updateMatrixWorld();
-    // The adapter's resetView closes over this initial frame even after resize.
-    const points = initial.points.map(p => new THREE.Vector3(p.x,p.y,p.z).project(camera));
-    return { maxAbsX: Math.max(...points.map(p => Math.abs(p.x))), maxAbsY: Math.max(...points.map(p => Math.abs(p.y))) };
-  });
-  if (report.checks.mobileResetProjection.maxAbsX > 1 || report.checks.mobileResetProjection.maxAbsY > 1) {
-    report.findings.push({ id: 'mobile-reset-keeps-desktop-frame',
-      message: 'After resizing to 390 px, reset still uses the desktop camera frame. Route endpoints project outside the canvas; see mobile screenshot.' });
-  }
+  await page.waitForTimeout(500);
+  const mobileCanvas = await page.locator('.depth-scene-canvas canvas').screenshot();
+  report.checks.mobileRoutePixels = await page.evaluate(async dataUrl => {
+    const image = new Image(); image.src = dataUrl; await image.decode();
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let minX = canvas.width, maxX = -1, count = 0;
+    for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) {
+      const i = (y * canvas.width + x) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      if ((r > 110 && g < r * 0.8 && b < g * 0.9) || (r > 140 && g > 90 && b < 100)) {
+        minX = Math.min(minX,x); maxX = Math.max(maxX,x); count++;
+      }
+    }
+    return { minX, maxX, count, width: canvas.width };
+  }, `data:image/png;base64,${mobileCanvas.toString('base64')}`);
+  assert.ok(report.checks.mobileRoutePixels.count > 20, 'Pipe must remain visible on mobile');
+  const pixels = report.checks.mobileRoutePixels;
+  if (pixels.minX < 4 || pixels.maxX >= pixels.width - 4) report.findings.push({
+    id: 'mobile-route-clipped', message: 'After resize and reset, pipe pixels touch a horizontal canvas edge.' });
   await page.screenshot({ path: path.join(output, 'd4-mobile-scene.png'), fullPage: true });
   report.checks.mobileScene = true;
 
@@ -98,12 +102,36 @@ try {
     const feature = { type: 'Feature', properties: { id: { kind: 'string', value: 'long-gas' }, objectType: 'restriction', restrictionType: 'gas_pipeline' },
       geometry: { type: 'LineString', coordinates: Array.from({ length: count+1 }, (_, i) => [37.4+i*0.000001,55.7]) } };
     const api = { getMapPage: async () => ({ type: 'FeatureCollection', features: [feature], nextCursor: null }) };
-    const loaded = await loadMapFeatures(api, 'budget-probe', { layer: 'input', bbox: [-180,-90,180,90], limit: 1000 }, new AbortController().signal, MAX_DEPTH_SCENE_FEATURES);
-    return { limit: MAX_DEPTH_SCENE_FEATURES, features: loaded.features.length,
-      meshes: toSceneCommunications(loaded.features, { x: 400000, y: 6170000 }).length };
+    try {
+      const loaded = await loadMapFeatures(api, 'budget-probe', { layer: 'input', bbox: [-180,-90,180,90], limit: 1000 }, new AbortController().signal, MAX_DEPTH_SCENE_FEATURES);
+      return { limit: MAX_DEPTH_SCENE_FEATURES, rejected: false, features: loaded.features.length,
+        meshes: toSceneCommunications(loaded.features, { x: 400000, y: 6170000 }).length };
+    } catch (error) {
+      if (!/2000/.test(error.message)) throw error;
+      return { limit: MAX_DEPTH_SCENE_FEATURES, rejected: true };
+    }
   });
-  if (report.checks.sceneBudget.meshes > report.checks.sceneBudget.limit) report.findings.push({ id: 'scene-budget-counts-features-only',
-    message: 'The feature limit does not bound generated scene meshes: one accepted LineString exceeds the scene limit.' });
+  if (!report.checks.sceneBudget.rejected) report.findings.push({ id: 'scene-budget-counts-features-only',
+    message: 'One accepted LineString exceeds the part limit.' });
+  report.checks.combinedBudget = await page.evaluate(async () => {
+    const { loadMapFeatures, MAX_DEPTH_SCENE_FEATURES } = await import('/src/features/network-map/use-map-features.ts');
+    const { buildDepthPaths, toMetricSegments, toSceneCommunications, sceneOrigin } = await import('/src/features/depth-profile/depth-path.ts');
+    const parts = Math.floor(MAX_DEPTH_SCENE_FEATURES * 0.6);
+    const id = value => ({ kind: 'string', value });
+    const geometry = { type: 'LineString', coordinates: Array.from({ length: parts+1 }, (_, i) => [37.4+i*0.000001,55.7]) };
+    const input = { type: 'Feature', geometry, properties: { id: id('gas'), objectType: 'restriction', restrictionType: 'gas_pipeline' } };
+    const result = { type: 'Feature', geometry, properties: { id: id('pipe'), objectType: 'heat_network', diameter: 80,
+      depthStart: 3, depthEnd: 3, startNodeId: id('root'), endNodeId: id('target') } };
+    const api = { getMapPage: async (_job, query) => ({ type: 'FeatureCollection', features: [query.layer === 'input' ? input : result], nextCursor: null }) };
+    const pages = await Promise.all(['input','result'].map(layer => loadMapFeatures(api, 'combined-budget',
+      { layer, bbox: [-180,-90,180,90], limit: 1000 }, new AbortController().signal, MAX_DEPTH_SCENE_FEATURES)));
+    const path = buildDepthPaths(pages[1].features)[0];
+    const routeParts = toMetricSegments(path).length;
+    const communicationParts = toSceneCommunications(pages[0].features, sceneOrigin(path)).length;
+    return { limit: MAX_DEPTH_SCENE_FEATURES, routeParts, communicationParts, total: routeParts + communicationParts };
+  });
+  if (report.checks.combinedBudget.total > report.checks.combinedBudget.limit) report.findings.push({
+    id: 'scene-budget-separate-layers', message: 'Input and result each pass their own limit but exceed one combined scene budget.' });
   assert.deepEqual(report.pageErrors, []);
   if (report.findings.length) process.exitCode = 2;
 } catch (e) {
