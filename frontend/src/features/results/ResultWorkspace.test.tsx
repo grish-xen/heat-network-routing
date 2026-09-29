@@ -16,7 +16,7 @@ vi.mock('../network-map/NetworkMap', () => ({
     return null
   },
 }))
-vi.mock('../network-3d/DepthScene', () => ({ DepthScene: (props: unknown) => { sceneMock.render(props); return <div>3D-сцена</div> } }))
+vi.mock('../network-3d/DepthScene', () => ({ DepthScene: (props: unknown) => { sceneMock.render(props); return <div data-testid="depth-scene">3D-сцена</div> } }))
 
 import { ResultWorkspace } from './ResultWorkspace'
 
@@ -131,7 +131,7 @@ describe('ResultWorkspace', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: /конечный потребитель/i }), 'string:старый резервный потребитель')
     await user.click(screen.getByRole('radio', { name: /вариант 2/i }))
 
-    expect(await screen.findByText(/загружаем профиль и 3d/i)).toBeVisible()
+    expect(await screen.findByText(/загружаем 3d-сцену/i)).toBeVisible()
     expect(screen.queryByRole('option', { name: 'строковый «старый потребитель»' })).not.toBeInTheDocument()
 
     await act(async () => {
@@ -149,7 +149,7 @@ describe('ResultWorkspace', () => {
 
     renderWorkspace('depth', depthApi)
 
-    expect(await screen.findByText(/загружаем профиль и 3d/i)).toBeVisible()
+    expect(await screen.findByText(/загружаем 3d-сцену/i)).toBeVisible()
     expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
   })
 
@@ -195,5 +195,39 @@ describe('ResultWorkspace', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/превышен предел объектов.*3d/i)
     expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
     expect(sceneMock.render).not.toHaveBeenCalled()
+  })
+
+  it('uses the 3D budget only for objects that are actually rendered', async () => {
+    const routeCoordinates = Array.from({ length: 72 }, (_, index) => [37.4 + index * 0.000001, 55.6] as const)
+    const buildingRing = Array.from({ length: 5939 }, (_, index) => [37.5 + index * 0.000001, 55.7] as const)
+    const route = { ...depthEdge({ kind: 'string', value: 'consumer' }), geometry: { type: 'LineString' as const, coordinates: routeCoordinates } }
+    const building: MapFeature = {
+      type: 'Feature', geometry: { type: 'Polygon', coordinates: [buildingRing] },
+      properties: { id: { kind: 'string', value: 'building' }, objectType: 'restriction' },
+    }
+    const depthApi = apiForDepthMap(vi.fn((_jobId, mapQuery) => Promise.resolve({
+      type: 'FeatureCollection' as const,
+      features: mapQuery.layer === 'result' ? [route] : [building],
+      nextCursor: null,
+    })))
+
+    renderWorkspace('depth', depthApi)
+
+    expect(await screen.findByTestId('depth-scene')).toBeVisible()
+    expect(screen.queryByText(/превышен предел объектов для 3d-сцены/i)).not.toBeInTheDocument()
+    expect(sceneMock.render).toHaveBeenLastCalledWith(expect.objectContaining({ segments: expect.arrayContaining([expect.any(Object)]) }))
+  })
+
+  it('keeps the profile available when communications cannot be loaded', async () => {
+    const depthApi = apiForDepthMap(vi.fn((_jobId, mapQuery) => mapQuery.layer === 'input'
+      ? Promise.reject(new Error('input layer failed'))
+      : Promise.resolve({ type: 'FeatureCollection' as const, features: [depthEdge({ kind: 'string', value: 'consumer' })], nextCursor: null })))
+    const user = userEvent.setup()
+
+    renderWorkspace('depth', depthApi)
+
+    await user.click(await screen.findByRole('tab', { name: /профиль/i }))
+    expect(await screen.findByRole('img', { name: /продольный профиль/i })).toBeVisible()
+    expect(screen.getByRole('link', { name: /скачать geojson/i })).toBeVisible()
   })
 })
