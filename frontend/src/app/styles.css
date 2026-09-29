@@ -285,6 +285,10 @@ h2 {
 .depth-profile-point { fill: #fff; stroke: var(--new-network); stroke-width: 3; }
 .depth-profile-values { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 0.8rem; font-weight: 700; }
 .depth-empty { display: grid; min-height: 12rem; padding: 1rem; place-items: center; text-align: center; color: var(--text-muted); }
+.depth-visualization-state { display: grid; min-height: 20rem; padding: 1.5rem; place-items: center; align-content: center; gap: 1rem; text-align: center; color: var(--text-muted); background: #edf3ed; }
+.depth-visualization-state .spinner { border-color: rgb(21 125 104 / 20%); border-top-color: var(--focus); }
+.depth-visualization-state .alert { max-width: 34rem; }
+.depth-visualization-state .button--secondary { margin-top: 0; background: #fff; }
 
 .dropzone-icon {
   display: grid;
@@ -714,12 +718,24 @@ h2 {
 
   .depth-scene-toolbar,
   .depth-scene-info {
+    min-width: 0;
     align-items: flex-start;
     flex-direction: column;
   }
 
   .depth-scene-info dl {
+    width: 100%;
     flex-wrap: wrap;
+  }
+
+  .depth-scene-toolbar > div,
+  .depth-scene-info dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .depth-scene-canvas {
+    min-height: 20rem;
   }
 }
 

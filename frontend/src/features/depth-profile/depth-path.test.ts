@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { MapFeature } from '../../shared/model/api'
-import { buildDepthPaths, selectDepthPath, toMetricSegments } from './depth-path'
+import { buildDepthPaths, selectDepthPath, toMetricSegments, toSceneCommunications } from './depth-path'
 
 const id = (value: string) => ({ kind: 'string' as const, value })
 const edge = (from: string, to: string, depthStart = 3, depthEnd = 3, coordinates: readonly (readonly [number, number])[] = [[37.426, 55.666], [37.4265, 55.666]]): MapFeature => ({
@@ -61,5 +61,14 @@ describe('depth path construction', () => {
     expect(scene).toHaveLength(2)
     expect(scene[0]!.end.x).not.toBe(scene[1]!.end.x)
     expect(scene[1]!.distanceStartM).toBe(scene[0]!.distanceEndM)
+  })
+
+  it('projects documented gas and cable envelopes while ignoring unknown restrictions', () => {
+    const origin = { x: 0, y: 0 }
+    const gas: MapFeature = { type: 'Feature', geometry: { type: 'LineString', coordinates: [[37.426, 55.666], [37.4262, 55.666]] }, properties: { id: id('gas'), objectType: 'restriction', restrictionType: 'gas_pipeline' } }
+    const unknown: MapFeature = { ...gas, properties: { ...gas.properties, id: id('unknown'), restrictionType: 'unknown_utility' } }
+
+    expect(toSceneCommunications([gas], origin)).toMatchObject([{ kind: 'gas_pipeline', topDepthM: 2.8, widthM: 0.4 }])
+    expect(toSceneCommunications([unknown], origin)).toEqual([])
   })
 })
