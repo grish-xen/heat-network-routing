@@ -40,6 +40,16 @@ describe('loadMapFeatures', () => {
     expect(getMapPage).toHaveBeenCalledTimes(2)
   })
 
+  it('counts every rendered line part, not only a long polyline feature', async () => {
+    const longLine: MapPage['features'][number] = {
+      ...feature('long-line'), geometry: { type: 'LineString', coordinates: [[37.4, 55.6], [37.41, 55.61], [37.42, 55.62], [37.43, 55.63]] },
+    }
+    const getMapPage = vi.fn().mockResolvedValue({ type: 'FeatureCollection', features: [longLine], nextCursor: null })
+
+    await expect(loadMapFeatures(apiWith(getMapPage), 'job-1', query, new AbortController().signal, 2)).rejects.toThrow(/предел.*объект/i)
+    expect(getMapPage).toHaveBeenCalledTimes(1)
+  })
+
   it('does not request a later cursor after abort', async () => {
     const controller = new AbortController()
     const getMapPage = vi.fn().mockImplementation(async () => {

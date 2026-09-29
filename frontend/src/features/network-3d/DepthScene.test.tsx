@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const adapter = vi.hoisted(() => ({ resetView: vi.fn(), destroy: vi.fn(), emitSelect: (index: number) => { void index } }))
+const adapter = vi.hoisted(() => ({ resetView: vi.fn(), setSelectedSection: vi.fn(), destroy: vi.fn(), emitSelect: (index: number) => { void index } }))
 vi.mock('./three-adapter', () => ({ createDepthSceneAdapter: vi.fn((_host: HTMLElement, _segments: unknown, _communications: unknown, options: { onSelect?: (index: number) => void }) => {
   adapter.emitSelect = (index: number) => options.onSelect?.(index)
   return adapter
@@ -11,7 +11,7 @@ vi.mock('./three-adapter', () => ({ createDepthSceneAdapter: vi.fn((_host: HTMLE
 import { DepthScene } from './DepthScene'
 import { createDepthSceneAdapter } from './three-adapter'
 
-beforeEach(() => { adapter.resetView.mockReset(); adapter.destroy.mockReset() })
+beforeEach(() => { adapter.resetView.mockReset(); adapter.setSelectedSection.mockReset(); adapter.destroy.mockReset(); vi.mocked(createDepthSceneAdapter).mockClear() })
 
 const segment = {
   feature: { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: [[37.4, 55.6] as const, [37.41, 55.61] as const] }, properties: { id: { kind: 'string' as const, value: 'edge-1' }, objectType: 'heat_network' as const, diameter: 80 } },
@@ -76,6 +76,7 @@ describe('DepthScene', () => {
 
     adapter.emitSelect(1)
     expect(await screen.findByText(/участок 2/i)).toBeVisible()
+    expect(vi.mocked(createDepthSceneAdapter)).toHaveBeenCalledTimes(1)
     expect(screen.getByText('ДУ 80')).toBeVisible()
     await user.click(screen.getByRole('button', { name: /сбросить ракурс/i }))
     expect(adapter.resetView).toHaveBeenCalledTimes(1)

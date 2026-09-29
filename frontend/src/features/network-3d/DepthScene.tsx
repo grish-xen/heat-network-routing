@@ -9,13 +9,17 @@ export function DepthScene({ segments, communications = [] }: { readonly segment
   const adapter = useRef<DepthSceneAdapter | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedSection, setSelectedSection] = useState(0)
+  const sceneKey = segments.map((segment) => `${segment.feature.properties.id.kind}:${segment.feature.properties.id.value}:${segment.start.x}:${segment.start.y}:${segment.end.x}:${segment.end.y}`).join('|')
+  const communicationsKey = communications.map((communication) => `${communication.kind}:${communication.start.x}:${communication.start.y}:${communication.end.x}:${communication.end.y}`).join('|')
   useEffect(() => {
-    if (segments.length === 0) return
+    if (!sceneKey) return
     if (!host.current) return
-    try { adapter.current = createDepthSceneAdapter(host.current, segments, communications, { selectedIndex: selectedSection, onSelect: setSelectedSection }) }
+    try { adapter.current = createDepthSceneAdapter(host.current, segments, communications, { onSelect: (index) => { adapter.current?.setSelectedSection(index); setSelectedSection(index) } }) }
     catch { queueMicrotask(() => setError('3D-сцена недоступна в этом браузере. Откройте карту или профиль.')) }
     return () => { adapter.current?.destroy(); adapter.current = null }
-  }, [segments, communications, selectedSection])
+    // `sceneKey` and `communicationsKey` deliberately detect value changes, not new array identities.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneKey, communicationsKey])
   if (segments.length === 0) return <p className="depth-empty">Нет участков с глубиной для 3D-сцены.</p>
   const first = segments[0]!
   const selected = segments[selectedSection] ?? first

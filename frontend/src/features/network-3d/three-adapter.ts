@@ -23,6 +23,7 @@ export function sceneObjectDescriptors(segments: readonly DepthSceneSegment[], c
 
 export interface DepthSceneAdapter {
   resetView(): void
+  setSelectedSection(index: number): void
   destroy(): void
 }
 export interface DepthSceneOptions { readonly selectedIndex?: number; readonly onSelect?: (index: number) => void }
@@ -76,11 +77,11 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   const bounds = segments.flatMap((segment) => [segment.start, segment.end])
-  const initialFrame = cameraFrame(bounds, camera.aspect)
   const size = Math.max(20, ...bounds.flatMap((point) => [Math.abs(point.x), Math.abs(point.y)]))
   const resetView = () => {
-    camera.position.copy(initialFrame.position)
-    controls.target.copy(initialFrame.target)
+    const frame = cameraFrame(bounds, camera.aspect)
+    camera.position.copy(frame.position)
+    controls.target.copy(frame.target)
     controls.update()
   }
   resetView()
@@ -89,13 +90,16 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
   surface.receiveShadow = true
   scene.add(surface)
   const routeMeshes: THREE.Mesh[] = []
+  const routeMaterials: THREE.MeshStandardMaterial[] = []
   for (const [index, segment] of segments.entries()) {
+    const material = new THREE.MeshStandardMaterial({ color: index === options.selectedIndex ? '#f6d34d' : '#f0643b', emissive: index === options.selectedIndex ? '#8b6612' : '#7d2d18', emissiveIntensity: 0.28, roughness: 0.36 })
     const mesh = new THREE.Mesh(
       buildEnvelopeGeometry(segment),
-      new THREE.MeshStandardMaterial({ color: index === options.selectedIndex ? '#f6d34d' : '#f0643b', emissive: index === options.selectedIndex ? '#8b6612' : '#7d2d18', emissiveIntensity: 0.28, roughness: 0.36 }),
+      material,
     )
     mesh.userData.routeIndex = index
     routeMeshes.push(mesh)
+    routeMaterials.push(material)
     scene.add(mesh)
     for (const point of [segment.start, segment.end]) {
       const guide = new THREE.Line(
@@ -134,5 +138,10 @@ export function createDepthSceneAdapter(container: HTMLElement, segments: readon
     renderer.setSize(width, height)
   })
   observer.observe(container)
-  return { resetView, destroy: () => { cancelAnimationFrame(frame); observer.disconnect(); renderer.domElement.removeEventListener('pointerup', onPointerUp); controls.dispose(); dispose(scene); renderer.dispose(); container.replaceChildren() } }
+  const setSelectedSection = (selectedIndex: number) => routeMaterials.forEach((material, index) => {
+    const active = index === selectedIndex
+    material.color.set(active ? '#f6d34d' : '#f0643b')
+    material.emissive.set(active ? '#8b6612' : '#7d2d18')
+  })
+  return { resetView, setSelectedSection, destroy: () => { cancelAnimationFrame(frame); observer.disconnect(); renderer.domElement.removeEventListener('pointerup', onPointerUp); controls.dispose(); dispose(scene); renderer.dispose(); container.replaceChildren() } }
 }
