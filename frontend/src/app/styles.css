@@ -718,12 +718,24 @@ h2 {
 
   .depth-scene-toolbar,
   .depth-scene-info {
+    min-width: 0;
     align-items: flex-start;
     flex-direction: column;
   }
 
   .depth-scene-info dl {
+    width: 100%;
     flex-wrap: wrap;
+  }
+
+  .depth-scene-toolbar > div,
+  .depth-scene-info dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .depth-scene-canvas {
+    min-height: 20rem;
   }
 }
 

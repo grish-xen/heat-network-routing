@@ -2,13 +2,14 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const adapter = vi.hoisted(() => ({ resetView: vi.fn(), destroy: vi.fn(), emitSelect: (_index: number) => undefined }))
+const adapter = vi.hoisted(() => ({ resetView: vi.fn(), destroy: vi.fn(), emitSelect: (index: number) => { void index } }))
 vi.mock('./three-adapter', () => ({ createDepthSceneAdapter: vi.fn((_host: HTMLElement, _segments: unknown, _communications: unknown, options: { onSelect?: (index: number) => void }) => {
   adapter.emitSelect = (index: number) => options.onSelect?.(index)
   return adapter
 }) }))
 
 import { DepthScene } from './DepthScene'
+import { createDepthSceneAdapter } from './three-adapter'
 
 beforeEach(() => { adapter.resetView.mockReset(); adapter.destroy.mockReset() })
 
@@ -32,6 +33,13 @@ describe('DepthScene', () => {
     render(<DepthScene segments={[]} />)
 
     expect(screen.getByText(/нет участков с глубиной/i)).toBeVisible()
+  })
+
+  it('explains when WebGL cannot create a 3D scene', async () => {
+    vi.mocked(createDepthSceneAdapter).mockImplementationOnce(() => { throw new Error('WebGL unavailable') })
+    render(<DepthScene segments={[segment]} />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/3d-сцена недоступна/i)
   })
 
   it('shows a compact legend and properties for the selected route', () => {

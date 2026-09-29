@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import type { HeatNetworkApi } from '../../shared/api/contracts'
 import { ApiClientError } from '../../shared/api/api-error'
@@ -28,16 +28,15 @@ interface ResultWorkspaceProps {
 export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset }: ResultWorkspaceProps) {
   const variants = useVariants(api, jobId)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [mapUnavailable, setMapUnavailable] = useState(false)
+  const [mapUnavailableScope, setMapUnavailableScope] = useState<string | null>(null)
   const [view, setView] = useState<'map' | 'profile' | '3d'>(mode === 'depth' ? '3d' : 'map')
-  const [endpointKey, setEndpointKey] = useState<string | null>(null)
+  const [endpointSelection, setEndpointSelection] = useState<{ readonly scope: string; readonly key: string } | null>(null)
   const ranked = [...(variants.data ?? [])].sort((left, right) => left.rank - right.rank)
   const selected = ranked.find((variant) => objectIdKey(variant.variantId) === selectedKey) ?? ranked[0]
   const selectedVariantKey = selected ? objectIdKey(selected.variantId) : null
-  useEffect(() => {
-    setEndpointKey(null)
-    setMapUnavailable(false)
-  }, [jobId, selectedVariantKey])
+  const depthScope = `${jobId}:${selectedVariantKey ?? ''}`
+  const endpointKey = endpointSelection?.scope === depthScope ? endpointSelection.key : null
+  const mapUnavailable = mapUnavailableScope === depthScope
   const bounds = useMapBounds(api, jobId, selected?.variantId)
   const depthQueries = useMapFeatureCollections(api, jobId, selected && bounds.data ? [{
     layer: 'result' as const, variantId: selected.variantId, bbox: expandBoundsForMapQuery(bounds.data), limit: 1000,
@@ -91,7 +90,7 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
         </section>}
         {mode === 'depth' && paths.length > 1 && <label className="depth-endpoint-selector">
           Конечный потребитель
-          <select value={objectIdKey(activePath!.endNodeId)} onChange={(event) => setEndpointKey(event.target.value)}>
+          <select value={objectIdKey(activePath!.endNodeId)} onChange={(event) => setEndpointSelection({ scope: depthScope, key: event.target.value })}>
             {paths.map((path) => <option key={objectIdKey(path.endNodeId)} value={objectIdKey(path.endNodeId)}>{formatTypedObjectId(path.endNodeId)}</option>)}
           </select>
         </label>}
@@ -112,7 +111,7 @@ export function ResultWorkspace({ api, jobId, mode = '2d', demo = false, onReset
             { layer: 'result', variantId: selected.variantId },
           ]}
           onUnavailable={(reason) => {
-            if (reason === 'GPU_UNAVAILABLE') setMapUnavailable(true)
+            if (reason === 'GPU_UNAVAILABLE') setMapUnavailableScope(depthScope)
           }}
         />}
         {view !== 'map' && depthLoading && <div className="depth-visualization-state"><Spinner /> Загружаем профиль и 3D-сцену…</div>}
